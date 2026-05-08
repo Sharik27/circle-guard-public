@@ -1,0 +1,65 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: circleguard-auth-service
+  namespace: circleguard
+  labels:
+    app: circleguard-auth-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: circleguard-auth-service
+  template:
+    metadata:
+      labels:
+        app: circleguard-auth-service
+    spec:
+      containers:
+        - name: circleguard-auth-service
+          image: circleguard-auth-service:latest
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8180
+          env:
+            - name: SPRING_DATASOURCE_URL
+              value: "jdbc:postgresql://host.docker.internal:5433/circleguard_auth"
+            - name: SPRING_DATASOURCE_USERNAME
+              valueFrom:
+                configMapKeyRef:
+                  name: infra-config
+                  key: DB_USERNAME
+            - name: SPRING_DATASOURCE_PASSWORD
+              valueFrom:
+                configMapKeyRef:
+                  name: infra-config
+                  key: DB_PASSWORD
+            - name: SPRING_LDAP_URLS
+              valueFrom:
+                configMapKeyRef:
+                  name: infra-config
+                  key: LDAP_URL
+            - name: SPRING_LDAP_BASE
+              valueFrom:
+                configMapKeyRef:
+                  name: infra-config
+                  key: LDAP_BASE
+            - name: SPRING_LDAP_USERNAME
+              valueFrom:
+                configMapKeyRef:
+                  name: infra-config
+                  key: LDAP_USERNAME
+            - name: SPRING_LDAP_PASSWORD
+              valueFrom:
+                configMapKeyRef:
+                  name: infra-config
+                  key: LDAP_PASSWORD
+            - name: MANAGEMENT_HEALTH_PROBES_ENABLED
+              value: "true"
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8180
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 5

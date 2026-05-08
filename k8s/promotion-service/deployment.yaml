@@ -1,0 +1,75 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: circleguard-promotion-service
+  namespace: circleguard
+  labels:
+    app: circleguard-promotion-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: circleguard-promotion-service
+  template:
+    metadata:
+      labels:
+        app: circleguard-promotion-service
+    spec:
+      containers:
+        - name: circleguard-promotion-service
+          image: circleguard-promotion-service:latest
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8088
+          env:
+            - name: SPRING_DATASOURCE_URL
+              value: "jdbc:postgresql://host.docker.internal:5433/circleguard_promotion"
+            - name: SPRING_DATASOURCE_USERNAME
+              valueFrom:
+                configMapKeyRef:
+                  name: infra-config
+                  key: DB_USERNAME
+            - name: SPRING_DATASOURCE_PASSWORD
+              valueFrom:
+                configMapKeyRef:
+                  name: infra-config
+                  key: DB_PASSWORD
+            - name: SPRING_NEO4J_URI
+              valueFrom:
+                configMapKeyRef:
+                  name: infra-config
+                  key: NEO4J_URI
+            - name: SPRING_NEO4J_AUTHENTICATION_USERNAME
+              valueFrom:
+                configMapKeyRef:
+                  name: infra-config
+                  key: NEO4J_USERNAME
+            - name: SPRING_NEO4J_AUTHENTICATION_PASSWORD
+              valueFrom:
+                configMapKeyRef:
+                  name: infra-config
+                  key: NEO4J_PASSWORD
+            - name: SPRING_DATA_REDIS_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: infra-config
+                  key: REDIS_HOST
+            - name: SPRING_DATA_REDIS_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: infra-config
+                  key: REDIS_PORT
+            - name: SPRING_KAFKA_BOOTSTRAP_SERVERS
+              valueFrom:
+                configMapKeyRef:
+                  name: infra-config
+                  key: KAFKA_BOOTSTRAP
+            - name: MANAGEMENT_HEALTH_PROBES_ENABLED
+              value: "true"
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8088
+            initialDelaySeconds: 40
+            periodSeconds: 10
+            failureThreshold: 5
