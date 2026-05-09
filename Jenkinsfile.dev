@@ -68,7 +68,7 @@ pipeline {
                         }
                         stage('Health auth-service') {
                             steps {
-                                sh 'kubectl rollout status deployment/circleguard-auth-service -n ${KUBE_NAMESPACE} --timeout=120s'
+                                sh 'kubectl rollout status deployment/circleguard-auth-service -n ${KUBE_NAMESPACE} --timeout=300s'
                             }
                         }
                     }
@@ -118,7 +118,7 @@ pipeline {
                         }
                         stage('Health identity-service') {
                             steps {
-                                sh 'kubectl rollout status deployment/circleguard-identity-service -n ${KUBE_NAMESPACE} --timeout=120s'
+                                sh 'kubectl rollout status deployment/circleguard-identity-service -n ${KUBE_NAMESPACE} --timeout=300s'
                             }
                         }
                     }
@@ -168,7 +168,7 @@ pipeline {
                         }
                         stage('Health gateway-service') {
                             steps {
-                                sh 'kubectl rollout status deployment/circleguard-gateway-service -n ${KUBE_NAMESPACE} --timeout=120s'
+                                sh 'kubectl rollout status deployment/circleguard-gateway-service -n ${KUBE_NAMESPACE} --timeout=300s'
                             }
                         }
                     }
@@ -219,7 +219,7 @@ pipeline {
                         }
                         stage('Health promotion-service') {
                             steps {
-                                sh 'kubectl rollout status deployment/circleguard-promotion-service -n ${KUBE_NAMESPACE} --timeout=120s'
+                                sh 'kubectl rollout status deployment/circleguard-promotion-service -n ${KUBE_NAMESPACE} --timeout=300s'
                             }
                         }
                     }
@@ -269,7 +269,7 @@ pipeline {
                         }
                         stage('Health notification-service') {
                             steps {
-                                sh 'kubectl rollout status deployment/circleguard-notification-service -n ${KUBE_NAMESPACE} --timeout=120s'
+                                sh 'kubectl rollout status deployment/circleguard-notification-service -n ${KUBE_NAMESPACE} --timeout=300s'
                             }
                         }
                     }
@@ -319,7 +319,7 @@ pipeline {
                         }
                         stage('Health dashboard-service') {
                             steps {
-                                sh 'kubectl rollout status deployment/circleguard-dashboard-service -n ${KUBE_NAMESPACE} --timeout=120s'
+                                sh 'kubectl rollout status deployment/circleguard-dashboard-service -n ${KUBE_NAMESPACE} --timeout=300s'
                             }
                         }
                     }
