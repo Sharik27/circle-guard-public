@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\CAMILA\\\\Desktop\\\\SemestreVIII\\\\IngesoftV\\\\circle-guard-public\\\\services\" -Directory -ErrorAction SilentlyContinue)",
+      "Bash(Select-Object -ExpandProperty Name)",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\CAMILA\\\\Desktop\\\\SemestreVIII\\\\IngesoftV\\\\circle-guard-public\" -Directory)"
+    ]
+  }
+}
