@@ -418,12 +418,12 @@ curl http://localhost:31084/actuator/health   # dashboard-service
 
 Respuesta esperada: `{ "status": "UP" }`
 
-![Endpoint /actuator/health del auth-service en el navegador](../screenshots/actuator-health-auth.png)
+![Endpoint /actuator/health de todos los service en el navegador](../screenshots/actuator-health-dev.png)
 
 ### Imágenes Docker
 
 ```bash
-docker images | grep circleguard
+docker images | grep "circleguard.*:dev"
 ```
 
 Cada servicio genera dos tags: `:dev` (estable para el entorno) y `:<BUILD_NUMBER>` (para rollback):
@@ -435,26 +435,4 @@ circleguard-auth-service          42     a1b2c3d4e5f6   2 minutes ago
 circleguard-identity-service      dev    b2c3d4e5f6a1   2 minutes ago
 ...
 ```
-
----
-
-## Análisis y Observaciones
-
-### Decisiones de diseño
-
-**Namespace `circleguard-dev`**: el aislamiento por namespace permite que dev y producción coexistan en el mismo clúster sin colisiones de nombres ni recursos compartidos. `kubectl delete namespace circleguard-dev` limpia el entorno completo sin afectar producción.
-
-**Tag `:dev` vs `:latest`**: reservar `:latest` para producción evita ambigüedad al revisar qué imagen corre en cada entorno. El tag `:dev` siempre apunta al último build del entorno de desarrollo.
-
-**`sed` sobre manifiestos en tiempo de ejecución**: los archivos `k8s/` base son la fuente de verdad para todos los entornos. Cada pipeline aplica sus propias transformaciones sin bifurcar los manifiestos. El mismo `deployment.yaml` sirve para dev, stage y producción.
-
-**`catchError` en los stages de test**: marcar los fallos de test como `UNSTABLE` en lugar de `FAILED` permite que el pipeline continúe hacia Docker y Deploy. Esto es intencional: el entorno dev debe actualizarse aunque haya tests rojos, pero el estado `UNSTABLE` notifica al equipo que hay trabajo pendiente en los tests.
-
-### Consideraciones operacionales
-
-| Aspecto | Detalle |
-|---|---|
-| **Infraestructura externa** | PostgreSQL, Neo4j, Kafka, Redis y OpenLDAP deben estar activos antes de lanzar el pipeline |
-| **TestContainers en promotion-service** | Requiere Docker daemon accesible desde el proceso de test; está disponible porque Jenkins comparte el socket `/var/run/docker.sock` |
-| **`imagePullPolicy: Never`** | Las imágenes deben existir en el mismo daemon Docker que usa el clúster (Docker Desktop integra ambos) |
-| **Tiempo de startup** | Spring Boot + Flyway + conexión a BD puede tomar hasta 60–80s por pod; de ahí el `--timeout=300s` |
+![Imagenes de docker con el tag :dev](../screenshots/docker-images-list-dev.png)
