@@ -157,8 +157,6 @@ stage('Servicios') {
 
 El bloque `parallel` ejecuta los seis servicios de forma **concurrente**. Cada uno avanza a través de sus cinco sub-stages de forma independiente, reduciendo el tiempo total del pipeline.
 
-![Vista de los 6 servicios ejecutándose en paralelo](../screenshots/jenkins-pipeline-stages-parallel.png)
-
 ---
 
 ### Sub-stages por servicio
@@ -233,8 +231,6 @@ Se generan dos tags por build:
 | `:dev` | Tag estable que referencian los manifiestos K8s del entorno dev |
 
 El Dockerfile usa **multi-stage build**: el stage `builder` compila con el JDK 21, y el stage final usa solo el JRE, produciendo imágenes de ~230–280 MB.
-
-![Imágenes Docker de los 6 servicios generadas tras el pipeline](../screenshots/docker-images-all-services.png)
 
 #### Sub-stage 4: Deploy Dev
 
@@ -389,7 +385,7 @@ circleguard-notification-service-7979d9b464-ckk9c   1/1     Running   0         
 circleguard-promotion-service-dfb4c4dcc-f5t5d       1/1     Running   0          65s
 ```
 
-![kubectl get pods -n circleguard-dev mostrando todos en Running](../screenshots/kubectl-pods-running.png)
+![kubectl get pods -n circleguard-dev mostrando todos en Running](../screenshots/kubectl-pods-running-dev.png)
 
 ### Servicios y NodePorts
 
@@ -407,7 +403,7 @@ circleguard-notification-service  NodePort   10.96.x.x     8082:31082/TCP   5m
 circleguard-dashboard-service     NodePort   10.96.x.x     8084:31084/TCP   5m
 ```
 
-![kubectl get services -n circleguard-dev con los NodePorts 31xxx](../screenshots/kubectl-services.png)
+![kubectl get services -n circleguard-dev con los NodePorts 31xxx](../screenshots/kubectl-services-dev.png)
 
 ### Health checks
 

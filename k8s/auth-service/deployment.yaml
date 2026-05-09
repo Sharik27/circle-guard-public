@@ -56,6 +56,8 @@ spec:
                   key: LDAP_PASSWORD
             - name: MANAGEMENT_HEALTH_PROBES_ENABLED
               value: "true"
+            - name: MANAGEMENT_HEALTH_LDAP_ENABLED
+              value: "false"
           readinessProbe:
             httpGet:
               path: /actuator/health/readiness
