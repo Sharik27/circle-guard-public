@@ -26,14 +26,16 @@ Un **Multibranch Pipeline** en Jenkins escanea automáticamente las ramas de un 
 
 ### Servicios incluidos en el pipeline
 
-| Servicio | Puerto interno | NodePort (acceso local) |
-|---|---|---|
-| `circleguard-auth-service` | 8180 | 30180 |
-| `circleguard-identity-service` | 8083 | 30083 |
-| `circleguard-gateway-service` | 8087 | 30087 |
-| `circleguard-promotion-service` | 8088 | 30088 |
-| `circleguard-notification-service` | 8082 | 30082 |
-| `circleguard-dashboard-service` | 8084 | 30084 |
+| Servicio | Puerto interno | NodePort dev (31xxx) | NodePort prod (30xxx) |
+|---|---|---|---|
+| `circleguard-auth-service` | 8180 | 31180 | 30180 |
+| `circleguard-identity-service` | 8083 | 31083 | 30083 |
+| `circleguard-gateway-service` | 8087 | 31087 | 30087 |
+| `circleguard-promotion-service` | 8088 | 31088 | 30088 |
+| `circleguard-notification-service` | 8082 | 31082 | 30082 |
+| `circleguard-dashboard-service` | 8084 | 31084 | 30084 |
+
+> Los NodePorts son **cluster-wide**: no se pueden repetir entre namespaces. El entorno dev usa el rango `31xxx` para coexistir con producción (`30xxx`) en el mismo clúster.
 
 ---
 
@@ -56,8 +58,6 @@ En la sección **Branch Sources**, hacer clic en **"Add source"** y seleccionar 
 |---|---|
 | Project Repository | URL del repositorio (local o remoto) |
 
-![Configuración del repositorio Git en el Multibranch Pipeline](../screenshots/jenkins-multibranch-scm-config.png)
-
 ### Paso 3 — Configurar el Script Path
 
 En la sección **Build Configuration**:
@@ -68,6 +68,8 @@ En la sección **Build Configuration**:
 | Script Path | `Jenkinsfile.dev` |
 
 > Esto le indica a Jenkins que el pipeline de desarrollo se define en `Jenkinsfile.dev` en la raíz del repositorio, en lugar del `Jenkinsfile` estándar.
+
+![Configuración del repositorio Git en el Multibranch Pipeline](../screenshots/jenkins-multibranch-scm-config.png)
 
 ### Paso 4 — Escaneo de ramas
 
@@ -330,7 +332,7 @@ spec:
 ```groovy
 stage('Health auth-service') {
     steps {
-        sh 'kubectl rollout status deployment/circleguard-auth-service -n ${KUBE_NAMESPACE} --timeout=120s'
+        sh 'kubectl rollout status deployment/circleguard-auth-service -n ${KUBE_NAMESPACE} --timeout=300s'
     }
 }
 ```
@@ -425,7 +427,7 @@ pipeline {
                         }
                         stage('Health auth-service') {
                             steps {
-                                sh 'kubectl rollout status deployment/circleguard-auth-service -n ${KUBE_NAMESPACE} --timeout=120s'
+                                sh 'kubectl rollout status deployment/circleguard-auth-service -n ${KUBE_NAMESPACE} --timeout=300s'
                             }
                         }
                     }
@@ -469,7 +471,7 @@ pipeline {
                         }
                         stage('Health identity-service') {
                             steps {
-                                sh 'kubectl rollout status deployment/circleguard-identity-service -n ${KUBE_NAMESPACE} --timeout=120s'
+                                sh 'kubectl rollout status deployment/circleguard-identity-service -n ${KUBE_NAMESPACE} --timeout=300s'
                             }
                         }
                     }
@@ -513,7 +515,7 @@ pipeline {
                         }
                         stage('Health gateway-service') {
                             steps {
-                                sh 'kubectl rollout status deployment/circleguard-gateway-service -n ${KUBE_NAMESPACE} --timeout=120s'
+                                sh 'kubectl rollout status deployment/circleguard-gateway-service -n ${KUBE_NAMESPACE} --timeout=300s'
                             }
                         }
                     }
@@ -557,7 +559,7 @@ pipeline {
                         }
                         stage('Health promotion-service') {
                             steps {
-                                sh 'kubectl rollout status deployment/circleguard-promotion-service -n ${KUBE_NAMESPACE} --timeout=120s'
+                                sh 'kubectl rollout status deployment/circleguard-promotion-service -n ${KUBE_NAMESPACE} --timeout=300s'
                             }
                         }
                     }
@@ -601,7 +603,7 @@ pipeline {
                         }
                         stage('Health notification-service') {
                             steps {
-                                sh 'kubectl rollout status deployment/circleguard-notification-service -n ${KUBE_NAMESPACE} --timeout=120s'
+                                sh 'kubectl rollout status deployment/circleguard-notification-service -n ${KUBE_NAMESPACE} --timeout=300s'
                             }
                         }
                     }
@@ -645,7 +647,7 @@ pipeline {
                         }
                         stage('Health dashboard-service') {
                             steps {
-                                sh 'kubectl rollout status deployment/circleguard-dashboard-service -n ${KUBE_NAMESPACE} --timeout=120s'
+                                sh 'kubectl rollout status deployment/circleguard-dashboard-service -n ${KUBE_NAMESPACE} --timeout=300s'
                             }
                         }
                     }
@@ -783,12 +785,12 @@ circleguard-dashboard-service     NodePort   10.96.x.x     8084:30084/TCP   5m
 ### Verificar health de los servicios
 
 ```bash
-curl http://localhost:30180/actuator/health   # auth-service
-curl http://localhost:30083/actuator/health   # identity-service
-curl http://localhost:30087/actuator/health   # gateway-service
-curl http://localhost:30088/actuator/health   # promotion-service
-curl http://localhost:30082/actuator/health   # notification-service
-curl http://localhost:30084/actuator/health   # dashboard-service
+curl http://localhost:31180/actuator/health   # auth-service
+curl http://localhost:31083/actuator/health   # identity-service
+curl http://localhost:31087/actuator/health   # gateway-service
+curl http://localhost:31088/actuator/health   # promotion-service
+curl http://localhost:31082/actuator/health   # notification-service
+curl http://localhost:31084/actuator/health   # dashboard-service
 ```
 
 Respuesta esperada:

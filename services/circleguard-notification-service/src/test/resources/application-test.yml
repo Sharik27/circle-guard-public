@@ -1,0 +1,24 @@
+spring:
+  kafka:
+    bootstrap-servers: localhost:9092
+  mail:
+    host: localhost
+    port: 25
+    properties:
+      mail:
+        smtp:
+          auth: false
+          starttls:
+            enable: false
+
+jwt:
+  secret: "test-secret-key-for-testing-only-1234567890ab"
+  expiration: 3600000
+
+qr:
+  secret: "test-qr-secret-key-for-testing-only-123456"
+  expiration: 300
+
+auth:
+  api:
+    url: http://localhost:8180

@@ -65,6 +65,23 @@ services:
       LDAP_DOMAIN: "circleguard.edu"
       LDAP_ADMIN_PASSWORD: "admin"
 
+  jenkins:
+    build:
+      context: .
+      dockerfile: jenkins/Dockerfile
+    container_name: jenkins
+    ports:
+      - "8080:8080"
+      - "50000:50000"
+    volumes:
+      - jenkins_home:/var/jenkins_home
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - KUBECONFIG=/var/jenkins_home/.kube/config
+    restart: unless-stopped
+
 volumes:
   pgdata:
   neo4jdata:
+  jenkins_home:
+    external: true

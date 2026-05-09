@@ -42,7 +42,7 @@ pipeline {
                             }
                             post {
                                 always {
-                                    junit allowEmptyResults: true,
+                                    junit allowEmptyResults: true, skipPublishingChecks: true,
                                           testResults: 'services/circleguard-auth-service/build/test-results/test/*.xml'
                                 }
                             }
@@ -92,7 +92,7 @@ pipeline {
                             }
                             post {
                                 always {
-                                    junit allowEmptyResults: true,
+                                    junit allowEmptyResults: true, skipPublishingChecks: true,
                                           testResults: 'services/circleguard-identity-service/build/test-results/test/*.xml'
                                 }
                             }
@@ -142,7 +142,7 @@ pipeline {
                             }
                             post {
                                 always {
-                                    junit allowEmptyResults: true,
+                                    junit allowEmptyResults: true, skipPublishingChecks: true,
                                           testResults: 'services/circleguard-gateway-service/build/test-results/test/*.xml'
                                 }
                             }
@@ -193,7 +193,7 @@ pipeline {
                             }
                             post {
                                 always {
-                                    junit allowEmptyResults: true,
+                                    junit allowEmptyResults: true, skipPublishingChecks: true,
                                           testResults: 'services/circleguard-promotion-service/build/test-results/test/*.xml'
                                 }
                             }
@@ -243,7 +243,7 @@ pipeline {
                             }
                             post {
                                 always {
-                                    junit allowEmptyResults: true,
+                                    junit allowEmptyResults: true, skipPublishingChecks: true,
                                           testResults: 'services/circleguard-notification-service/build/test-results/test/*.xml'
                                 }
                             }
@@ -293,7 +293,7 @@ pipeline {
                             }
                             post {
                                 always {
-                                    junit allowEmptyResults: true,
+                                    junit allowEmptyResults: true, skipPublishingChecks: true,
                                           testResults: 'services/circleguard-dashboard-service/build/test-results/test/*.xml'
                                 }
                             }
@@ -332,7 +332,7 @@ pipeline {
 
     post {
         always {
-            junit allowEmptyResults: true,
+            junit allowEmptyResults: true, skipPublishingChecks: true,
                   testResults: '**/build/test-results/test/*.xml'
         }
         success {

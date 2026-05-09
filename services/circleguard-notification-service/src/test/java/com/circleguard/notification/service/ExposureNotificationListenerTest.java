@@ -37,6 +37,9 @@ class ExposureNotificationListenerTest {
     @MockBean
     private PushService pushService;
 
+    @MockBean
+    private LmsService lmsService;
+
     @Test
     void shouldHandleStatusChangeEventWithoutError() {
         String mockEvent = "{\"userId\": \"user-123\", \"newStatus\": \"EXPOSED\"}";

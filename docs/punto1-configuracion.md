@@ -190,67 +190,152 @@ docker images | grep "circleguard.*latest"
 
 ## 2. Jenkins
 
-Jenkins se ejecuta como **contenedor Docker**, lo que evita instalaciones locales y facilita la portabilidad. Se monta el socket de Docker del host (`/var/run/docker.sock`) para que Jenkins pueda construir imágenes desde los pipelines.
+Jenkins se ejecuta como **contenedor Docker** integrado en `docker-compose.dev.yml`. La imagen oficial no incluye Docker CLI ni `kubectl`, por lo que se utiliza una imagen personalizada definida en `jenkins/Dockerfile`.
 
-### 2.1 Levantar el contenedor
+### 2.1 `jenkins/Dockerfile`
 
-```powershell
-docker volume create jenkins_home
+```dockerfile
+FROM jenkins/jenkins:lts-jdk21
 
-docker run -d --name jenkins --restart on-failure -p 8080:8080 -p 50000:50000 -v jenkins_home:/var/jenkins_home -v //var/run/docker.sock:/var/run/docker.sock jenkins/jenkins:lts
+USER root
+
+# Docker CLI
+RUN apt-get update && apt-get install -y \
+    apt-transport-https ca-certificates curl gnupg lsb-release && \
+    curl -fsSL https://download.docker.com/linux/debian/gpg \
+      | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg && \
+    echo "deb [arch=amd64 signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] \
+      https://download.docker.com/linux/debian $(lsb_release -cs) stable" \
+      | tee /etc/apt/sources.list.d/docker.list > /dev/null && \
+    apt-get update && apt-get install -y docker-ce-cli && \
+    rm -rf /var/lib/apt/lists/*
+
+# kubectl
+RUN curl -LO "https://dl.k8s.io/release/$(curl -Ls https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl" && \
+    install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl && \
+    rm kubectl
+
+# Permite que jenkins use el socket de Docker
+RUN groupadd -f docker && usermod -aG docker jenkins
+
+USER jenkins
 ```
 
-| Parámetro | Descripción |
+| Capa | Propósito |
 |---|---|
-| `-p 8080:8080` | Puerto de la interfaz web de Jenkins |
-| `-p 50000:50000` | Puerto de agentes Jenkins (JNLP) |
-| `-v jenkins_home:/var/jenkins_home` | Volumen persistente para configuración y jobs |
-| `-v //var/run/docker.sock:/var/run/docker.sock` | Acceso al daemon Docker del host |
+| `lts-jdk21` | Base oficial con Java 21 — necesario para compilar con Gradle |
+| Docker CLI | Permite ejecutar `docker build` y `docker tag` desde los stages del pipeline |
+| kubectl | Permite aplicar manifiestos K8s y verificar deployments desde el pipeline |
+| `usermod -aG docker jenkins` | Permite al usuario `jenkins` usar el socket de Docker sin `sudo` |
 
-### 2.2 Obtener la contraseña inicial
+### 2.2 Servicio Jenkins en `docker-compose.dev.yml`
+
+```yaml
+jenkins:
+  build:
+    context: .
+    dockerfile: jenkins/Dockerfile
+  container_name: jenkins
+  ports:
+    - "8080:8080"
+    - "50000:50000"
+  volumes:
+    - jenkins_home:/var/jenkins_home
+    - /var/run/docker.sock:/var/run/docker.sock
+  environment:
+    - KUBECONFIG=/var/jenkins_home/.kube/config
+  restart: unless-stopped
+```
+
+El volumen `jenkins_home` se declara como **externo** para que Compose reutilice el volumen existente en lugar de crear uno nuevo con prefijo (`circle-guard-public_jenkins_home`):
+
+```yaml
+volumes:
+  jenkins_home:
+    external: true
+```
+
+### 2.3 Levantar Jenkins
+
+```powershell
+# Primera vez: crear el volumen manualmente
+docker volume create jenkins_home
+
+# Construir la imagen personalizada y levantar el contenedor
+docker-compose -f docker-compose.dev.yml build jenkins
+docker-compose -f docker-compose.dev.yml up -d jenkins
+```
+
+### 2.4 Obtener la contraseña inicial
 
 ```powershell
 docker exec jenkins cat /var/jenkins_home/secrets/initialAdminPassword
 ```
 
-> **Nota:** Ejecutar este comando en PowerShell o en la terminal integrada de Docker Desktop. En Git Bash la ruta se traduce incorrectamente.
-
-### 2.3 Instalación de plugins sugeridos
+### 2.5 Instalación de plugins sugeridos
 
 Seleccionar **Install suggested plugins** y esperar a que finalice la instalación automática.
 
 ![Instalación de plugins sugeridos en progreso](../screenshots/jenkins-plugins-installing.png)
 
-### 2.4 Creación del usuario administrador
+### 2.6 Creación del usuario administrador
 
-Completar el formulario con el nombre de usuario, contraseña y correo del administrador, luego hacer clic en **Save and Continue**.
+Completar el formulario con nombre de usuario, contraseña y correo, luego hacer clic en **Save and Continue**.
 
 ![Creación del usuario administrador de Jenkins](../screenshots/jenkins-create-admin-user.png)
 
-### 2.5 Confirmación de URL de Jenkins
+### 2.7 Confirmación de URL de Jenkins
 
 Confirmar la URL de la instancia (`http://localhost:8080`) y hacer clic en **Save and Finish**.
 
-### 2.6 Dashboard de Jenkins
-
-Jenkins queda listo para su uso.
-
 ![Dashboard principal de Jenkins tras la configuración inicial](../screenshots/jenkins-dashboard.png)
 
-### 2.7 Instalación de plugins adicionales
+### 2.8 Instalación de plugins adicionales
 
-Ir a **Manage Jenkins → Plugins → Available plugins** e instalar los siguientes:
+Ir a **Manage Jenkins → Plugins → Available plugins** e instalar:
 
 | Plugin | Propósito |
 |---|---|
-| Docker Pipeline | Permite construir y publicar imágenes Docker desde un `Jenkinsfile` |
-| Kubernetes CLI | Permite ejecutar comandos `kubectl` desde pipelines |
-
-Buscar cada plugin, seleccionarlo y hacer clic en **Install**.
+| Docker Pipeline | Permite construir imágenes Docker desde un `Jenkinsfile` |
+| Kubernetes CLI | Permite ejecutar `kubectl` desde pipelines |
 
 ![Búsqueda e instalación del plugin Docker Pipeline](../screenshots/jenkins-plugin-docker-pipeline.png)
 
 ![Búsqueda e instalación del plugin Kubernetes CLI](../screenshots/jenkins-plugin-kubernetes-cli.png)
+
+### 2.9 Configurar el kubeconfig dentro del contenedor
+
+El contenedor necesita acceso al kubeconfig del host para que `kubectl` alcance el clúster de Docker Desktop. Además, la URL del API server debe cambiarse de `127.0.0.1` a `host.docker.internal`, ya que dentro del contenedor `127.0.0.1` apunta al propio contenedor.
+
+```powershell
+# Copiar el kubeconfig al volumen de Jenkins
+docker exec -u root jenkins mkdir -p /var/jenkins_home/.kube
+docker cp "$env:USERPROFILE\.kube\config" jenkins:/var/jenkins_home/.kube/config
+
+# Ajustar la URL del API server para acceso desde el contenedor
+docker exec -u root jenkins sed -i `
+  's|https://127.0.0.1|https://host.docker.internal|g' `
+  /var/jenkins_home/.kube/config
+```
+
+### 2.10 Verificación de herramientas en el contenedor
+
+```powershell
+docker exec jenkins java -version
+# openjdk version "21.x.x"
+
+docker exec jenkins docker --version
+# Docker version 29.x.x
+
+docker exec jenkins kubectl version --client
+# gitVersion: v1.x.x
+
+docker exec jenkins kubectl get nodes
+# NAME             STATUS   ROLES           AGE
+# docker-desktop   Ready    control-plane   ...
+```
+
+![Verificación de Java, Docker CLI y kubectl dentro del contenedor Jenkins](../screenshots/jenkins-tools-verify.png)
 
 ---
 
