@@ -1,0 +1,327 @@
+pipeline {
+    agent any
+
+    environment {
+        KUBE_NAMESPACE = 'circleguard-dev'
+        ENV_TAG        = 'dev'
+    }
+
+    stages {
+
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage('Infraestructura K8s Base') {
+            steps {
+                sh 'kubectl apply -f k8s/namespace-dev.yaml'
+                sh "sed 's/namespace: circleguard/namespace: circleguard-dev/g' k8s/configmap-infra.yaml | kubectl apply -f -"
+            }
+        }
+
+        stage('Servicios') {
+            parallel {
+
+                // ─────────────────────────────────────────────
+                // auth-service  |  puerto 8180  |  NodePort 30180
+                // ─────────────────────────────────────────────
+                stage('auth-service') {
+                    stages {
+                        stage('Build auth-service') {
+                            steps {
+                                sh './gradlew :services:circleguard-auth-service:bootJar -x test --no-daemon'
+                            }
+                        }
+                        stage('Tests auth-service') {
+                            steps {
+                                sh './gradlew :services:circleguard-auth-service:test --no-daemon'
+                            }
+                            post {
+                                always {
+                                    junit allowEmptyResults: true,
+                                          testResults: 'services/circleguard-auth-service/build/test-results/test/*.xml'
+                                }
+                            }
+                        }
+                        stage('Docker auth-service') {
+                            steps {
+                                sh "docker build -t circleguard-auth-service:${BUILD_NUMBER} -f services/circleguard-auth-service/Dockerfile ."
+                                sh "docker tag circleguard-auth-service:${BUILD_NUMBER} circleguard-auth-service:${ENV_TAG}"
+                            }
+                        }
+                        stage('Deploy Dev auth-service') {
+                            steps {
+                                sh '''
+                                    sed 's/namespace: circleguard/namespace: circleguard-dev/g' k8s/auth-service/deployment.yaml \
+                                        | sed 's|:latest|:dev|g' \
+                                        | kubectl apply -f -
+                                    sed 's/namespace: circleguard/namespace: circleguard-dev/g' k8s/auth-service/service.yaml \
+                                        | kubectl apply -f -
+                                    kubectl rollout restart deployment/circleguard-auth-service -n ${KUBE_NAMESPACE}
+                                '''
+                            }
+                        }
+                        stage('Health auth-service') {
+                            steps {
+                                sh 'kubectl rollout status deployment/circleguard-auth-service -n ${KUBE_NAMESPACE} --timeout=120s'
+                            }
+                        }
+                    }
+                }
+
+                // ─────────────────────────────────────────────
+                // identity-service  |  puerto 8083  |  NodePort 30083
+                // ─────────────────────────────────────────────
+                stage('identity-service') {
+                    stages {
+                        stage('Build identity-service') {
+                            steps {
+                                sh './gradlew :services:circleguard-identity-service:bootJar -x test --no-daemon'
+                            }
+                        }
+                        stage('Tests identity-service') {
+                            steps {
+                                sh './gradlew :services:circleguard-identity-service:test --no-daemon'
+                            }
+                            post {
+                                always {
+                                    junit allowEmptyResults: true,
+                                          testResults: 'services/circleguard-identity-service/build/test-results/test/*.xml'
+                                }
+                            }
+                        }
+                        stage('Docker identity-service') {
+                            steps {
+                                sh "docker build -t circleguard-identity-service:${BUILD_NUMBER} -f services/circleguard-identity-service/Dockerfile ."
+                                sh "docker tag circleguard-identity-service:${BUILD_NUMBER} circleguard-identity-service:${ENV_TAG}"
+                            }
+                        }
+                        stage('Deploy Dev identity-service') {
+                            steps {
+                                sh '''
+                                    sed 's/namespace: circleguard/namespace: circleguard-dev/g' k8s/identity-service/deployment.yaml \
+                                        | sed 's|:latest|:dev|g' \
+                                        | kubectl apply -f -
+                                    sed 's/namespace: circleguard/namespace: circleguard-dev/g' k8s/identity-service/service.yaml \
+                                        | kubectl apply -f -
+                                    kubectl rollout restart deployment/circleguard-identity-service -n ${KUBE_NAMESPACE}
+                                '''
+                            }
+                        }
+                        stage('Health identity-service') {
+                            steps {
+                                sh 'kubectl rollout status deployment/circleguard-identity-service -n ${KUBE_NAMESPACE} --timeout=120s'
+                            }
+                        }
+                    }
+                }
+
+                // ─────────────────────────────────────────────
+                // gateway-service  |  puerto 8087  |  NodePort 30087
+                // ─────────────────────────────────────────────
+                stage('gateway-service') {
+                    stages {
+                        stage('Build gateway-service') {
+                            steps {
+                                sh './gradlew :services:circleguard-gateway-service:bootJar -x test --no-daemon'
+                            }
+                        }
+                        stage('Tests gateway-service') {
+                            steps {
+                                sh './gradlew :services:circleguard-gateway-service:test --no-daemon'
+                            }
+                            post {
+                                always {
+                                    junit allowEmptyResults: true,
+                                          testResults: 'services/circleguard-gateway-service/build/test-results/test/*.xml'
+                                }
+                            }
+                        }
+                        stage('Docker gateway-service') {
+                            steps {
+                                sh "docker build -t circleguard-gateway-service:${BUILD_NUMBER} -f services/circleguard-gateway-service/Dockerfile ."
+                                sh "docker tag circleguard-gateway-service:${BUILD_NUMBER} circleguard-gateway-service:${ENV_TAG}"
+                            }
+                        }
+                        stage('Deploy Dev gateway-service') {
+                            steps {
+                                sh '''
+                                    sed 's/namespace: circleguard/namespace: circleguard-dev/g' k8s/gateway-service/deployment.yaml \
+                                        | sed 's|:latest|:dev|g' \
+                                        | kubectl apply -f -
+                                    sed 's/namespace: circleguard/namespace: circleguard-dev/g' k8s/gateway-service/service.yaml \
+                                        | kubectl apply -f -
+                                    kubectl rollout restart deployment/circleguard-gateway-service -n ${KUBE_NAMESPACE}
+                                '''
+                            }
+                        }
+                        stage('Health gateway-service') {
+                            steps {
+                                sh 'kubectl rollout status deployment/circleguard-gateway-service -n ${KUBE_NAMESPACE} --timeout=120s'
+                            }
+                        }
+                    }
+                }
+
+                // ─────────────────────────────────────────────
+                // promotion-service  |  puerto 8088  |  NodePort 30088
+                // Usa TestContainers (Neo4j + PostgreSQL) — requiere Docker en el agente
+                // ─────────────────────────────────────────────
+                stage('promotion-service') {
+                    stages {
+                        stage('Build promotion-service') {
+                            steps {
+                                sh './gradlew :services:circleguard-promotion-service:bootJar -x test --no-daemon'
+                            }
+                        }
+                        stage('Tests promotion-service') {
+                            steps {
+                                sh './gradlew :services:circleguard-promotion-service:test --no-daemon'
+                            }
+                            post {
+                                always {
+                                    junit allowEmptyResults: true,
+                                          testResults: 'services/circleguard-promotion-service/build/test-results/test/*.xml'
+                                }
+                            }
+                        }
+                        stage('Docker promotion-service') {
+                            steps {
+                                sh "docker build -t circleguard-promotion-service:${BUILD_NUMBER} -f services/circleguard-promotion-service/Dockerfile ."
+                                sh "docker tag circleguard-promotion-service:${BUILD_NUMBER} circleguard-promotion-service:${ENV_TAG}"
+                            }
+                        }
+                        stage('Deploy Dev promotion-service') {
+                            steps {
+                                sh '''
+                                    sed 's/namespace: circleguard/namespace: circleguard-dev/g' k8s/promotion-service/deployment.yaml \
+                                        | sed 's|:latest|:dev|g' \
+                                        | kubectl apply -f -
+                                    sed 's/namespace: circleguard/namespace: circleguard-dev/g' k8s/promotion-service/service.yaml \
+                                        | kubectl apply -f -
+                                    kubectl rollout restart deployment/circleguard-promotion-service -n ${KUBE_NAMESPACE}
+                                '''
+                            }
+                        }
+                        stage('Health promotion-service') {
+                            steps {
+                                sh 'kubectl rollout status deployment/circleguard-promotion-service -n ${KUBE_NAMESPACE} --timeout=120s'
+                            }
+                        }
+                    }
+                }
+
+                // ─────────────────────────────────────────────
+                // notification-service  |  puerto 8082  |  NodePort 30082
+                // ─────────────────────────────────────────────
+                stage('notification-service') {
+                    stages {
+                        stage('Build notification-service') {
+                            steps {
+                                sh './gradlew :services:circleguard-notification-service:bootJar -x test --no-daemon'
+                            }
+                        }
+                        stage('Tests notification-service') {
+                            steps {
+                                sh './gradlew :services:circleguard-notification-service:test --no-daemon'
+                            }
+                            post {
+                                always {
+                                    junit allowEmptyResults: true,
+                                          testResults: 'services/circleguard-notification-service/build/test-results/test/*.xml'
+                                }
+                            }
+                        }
+                        stage('Docker notification-service') {
+                            steps {
+                                sh "docker build -t circleguard-notification-service:${BUILD_NUMBER} -f services/circleguard-notification-service/Dockerfile ."
+                                sh "docker tag circleguard-notification-service:${BUILD_NUMBER} circleguard-notification-service:${ENV_TAG}"
+                            }
+                        }
+                        stage('Deploy Dev notification-service') {
+                            steps {
+                                sh '''
+                                    sed 's/namespace: circleguard/namespace: circleguard-dev/g' k8s/notification-service/deployment.yaml \
+                                        | sed 's|:latest|:dev|g' \
+                                        | kubectl apply -f -
+                                    sed 's/namespace: circleguard/namespace: circleguard-dev/g' k8s/notification-service/service.yaml \
+                                        | kubectl apply -f -
+                                    kubectl rollout restart deployment/circleguard-notification-service -n ${KUBE_NAMESPACE}
+                                '''
+                            }
+                        }
+                        stage('Health notification-service') {
+                            steps {
+                                sh 'kubectl rollout status deployment/circleguard-notification-service -n ${KUBE_NAMESPACE} --timeout=120s'
+                            }
+                        }
+                    }
+                }
+
+                // ─────────────────────────────────────────────
+                // dashboard-service  |  puerto 8084  |  NodePort 30084
+                // ─────────────────────────────────────────────
+                stage('dashboard-service') {
+                    stages {
+                        stage('Build dashboard-service') {
+                            steps {
+                                sh './gradlew :services:circleguard-dashboard-service:bootJar -x test --no-daemon'
+                            }
+                        }
+                        stage('Tests dashboard-service') {
+                            steps {
+                                sh './gradlew :services:circleguard-dashboard-service:test --no-daemon'
+                            }
+                            post {
+                                always {
+                                    junit allowEmptyResults: true,
+                                          testResults: 'services/circleguard-dashboard-service/build/test-results/test/*.xml'
+                                }
+                            }
+                        }
+                        stage('Docker dashboard-service') {
+                            steps {
+                                sh "docker build -t circleguard-dashboard-service:${BUILD_NUMBER} -f services/circleguard-dashboard-service/Dockerfile ."
+                                sh "docker tag circleguard-dashboard-service:${BUILD_NUMBER} circleguard-dashboard-service:${ENV_TAG}"
+                            }
+                        }
+                        stage('Deploy Dev dashboard-service') {
+                            steps {
+                                sh '''
+                                    sed 's/namespace: circleguard/namespace: circleguard-dev/g' k8s/dashboard-service/deployment.yaml \
+                                        | sed 's|:latest|:dev|g' \
+                                        | kubectl apply -f -
+                                    sed 's/namespace: circleguard/namespace: circleguard-dev/g' k8s/dashboard-service/service.yaml \
+                                        | kubectl apply -f -
+                                    kubectl rollout restart deployment/circleguard-dashboard-service -n ${KUBE_NAMESPACE}
+                                '''
+                            }
+                        }
+                        stage('Health dashboard-service') {
+                            steps {
+                                sh 'kubectl rollout status deployment/circleguard-dashboard-service -n ${KUBE_NAMESPACE} --timeout=120s'
+                            }
+                        }
+                    }
+                }
+
+            } // end parallel
+        } // end stage Servicios
+
+    } // end stages
+
+    post {
+        always {
+            junit allowEmptyResults: true,
+                  testResults: '**/build/test-results/test/*.xml'
+        }
+        success {
+            echo 'Dev environment (circleguard-dev) actualizado exitosamente para todos los servicios.'
+        }
+        failure {
+            echo 'Pipeline fallido — revisar los logs del stage correspondiente.'
+        }
+    }
+}
