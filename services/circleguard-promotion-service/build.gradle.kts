@@ -31,3 +31,9 @@ dependencies {
     testImplementation("org.testcontainers:postgresql:1.19.3")
     testImplementation("org.testcontainers:neo4j:1.19.3")
 }
+
+tasks.test {
+    useJUnitPlatform {
+        excludeTags("testcontainers")
+    }
+}

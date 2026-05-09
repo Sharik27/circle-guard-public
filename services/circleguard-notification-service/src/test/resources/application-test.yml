@@ -11,6 +11,11 @@ spring:
           starttls:
             enable: false
 
+management:
+  health:
+    mail:
+      enabled: false
+
 jwt:
   secret: "test-secret-key-for-testing-only-1234567890ab"
   expiration: 3600000
