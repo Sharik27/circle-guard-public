@@ -3,7 +3,13 @@
     "allow": [
       "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\CAMILA\\\\Desktop\\\\SemestreVIII\\\\IngesoftV\\\\circle-guard-public\\\\services\" -Directory -ErrorAction SilentlyContinue)",
       "Bash(Select-Object -ExpandProperty Name)",
-      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\CAMILA\\\\Desktop\\\\SemestreVIII\\\\IngesoftV\\\\circle-guard-public\" -Directory)"
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\CAMILA\\\\Desktop\\\\SemestreVIII\\\\IngesoftV\\\\circle-guard-public\" -Directory)",
+      "Bash(Get-ChildItem -Recurse -Path \"C:\\\\Users\\\\CAMILA\\\\Desktop\\\\SemestreVIII\\\\IngesoftV\\\\circle-guard-public\\\\services\\\\circleguard-auth-service\\\\src\\\\main\\\\java\" -Filter \"*.java\")",
+      "Bash(Select-Object FullName)",
+      "PowerShell(Get-ChildItem -Path \"C:\\\\Users\\\\CAMILA\\\\Desktop\\\\SemestreVIII\\\\IngesoftV\\\\circle-guard-public\\\\services\\\\circleguard-auth-service\\\\src\\\\main\\\\java\" -Recurse | Where-Object { $_.Extension -eq \".java\" } | ForEach-Object { $_.FullName })",
+      "Bash(xargs grep -l \"enum HealthStatus\\\\|class HealthStatus\")",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\CAMILA\\\\Desktop\\\\SemestreVIII\\\\IngesoftV\\\\circle-guard-public\\\\services\" -Directory)",
+      "Bash(Select-Object Name)"
     ]
   }
 }

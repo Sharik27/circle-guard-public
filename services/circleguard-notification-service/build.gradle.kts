@@ -21,4 +21,19 @@ dependencies {
     annotationProcessor("org.projectlombok:lombok")
     implementation("org.springframework.boot:spring-boot-starter-actuator")
     testImplementation("org.springframework.boot:spring-boot-starter-test")
+    testImplementation("org.springframework.kafka:spring-kafka-test")
+}
+
+tasks.register<Test>("unitTest") {
+    description = "Runs unit tests only (@Tag(\"unit\"))"
+    group = "verification"
+    useJUnitPlatform { includeTags("unit") }
+    testResultsDir.set(layout.buildDirectory.dir("test-results/unitTest"))
+}
+
+tasks.register<Test>("integrationTest") {
+    description = "Runs integration tests only (@Tag(\"integration\"))"
+    group = "verification"
+    useJUnitPlatform { includeTags("integration") }
+    testResultsDir.set(layout.buildDirectory.dir("test-results/integrationTest"))
 }

@@ -24,4 +24,20 @@ dependencies {
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("org.springframework.kafka:spring-kafka-test")
     testImplementation("org.springframework.security:spring-security-test")
+    testImplementation("org.testcontainers:junit-jupiter:1.19.3")
+    testImplementation("org.testcontainers:postgresql:1.19.3")
+}
+
+tasks.register<Test>("unitTest") {
+    description = "Runs unit tests only (@Tag(\"unit\"))"
+    group = "verification"
+    useJUnitPlatform { includeTags("unit") }
+    testResultsDir.set(layout.buildDirectory.dir("test-results/unitTest"))
+}
+
+tasks.register<Test>("integrationTest") {
+    description = "Runs integration tests only (@Tag(\"integration\"))"
+    group = "verification"
+    useJUnitPlatform { includeTags("integration") }
+    testResultsDir.set(layout.buildDirectory.dir("test-results/integrationTest"))
 }

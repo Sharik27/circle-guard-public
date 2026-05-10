@@ -37,3 +37,17 @@ tasks.test {
         excludeTags("testcontainers")
     }
 }
+
+tasks.register<Test>("unitTest") {
+    description = "Runs unit tests only (@Tag(\"unit\"))"
+    group = "verification"
+    useJUnitPlatform { includeTags("unit") }
+    testResultsDir.set(layout.buildDirectory.dir("test-results/unitTest"))
+}
+
+tasks.register<Test>("integrationTest") {
+    description = "Runs integration tests only (@Tag(\"integration\"))"
+    group = "verification"
+    useJUnitPlatform { includeTags("integration") }
+    testResultsDir.set(layout.buildDirectory.dir("test-results/integrationTest"))
+}
