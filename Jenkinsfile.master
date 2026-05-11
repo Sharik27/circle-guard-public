@@ -1,0 +1,490 @@
+pipeline {
+    agent any
+
+    environment {
+        KUBE_NAMESPACE = 'circleguard'
+        ENV_TAG        = 'master'
+    }
+
+    stages {
+
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage('Infraestructura K8s Base') {
+            steps {
+                sh 'kubectl apply -f k8s/namespace.yaml'
+                sh 'kubectl apply -f k8s/configmap-infra.yaml'
+            }
+        }
+
+        // ─────────────────────────────────────────────
+        // NIVEL 1: Build — compilar JARs sin ejecutar tests
+        // ─────────────────────────────────────────────
+        stage('Build') {
+            parallel {
+                stage('Build auth-service') {
+                    steps {
+                        sh './gradlew :services:circleguard-auth-service:bootJar -x test --no-daemon'
+                    }
+                }
+                stage('Build identity-service') {
+                    steps {
+                        sh './gradlew :services:circleguard-identity-service:bootJar -x test --no-daemon'
+                    }
+                }
+                stage('Build gateway-service') {
+                    steps {
+                        sh './gradlew :services:circleguard-gateway-service:bootJar -x test --no-daemon'
+                    }
+                }
+                stage('Build promotion-service') {
+                    steps {
+                        sh './gradlew :services:circleguard-promotion-service:bootJar -x test --no-daemon'
+                    }
+                }
+                stage('Build notification-service') {
+                    steps {
+                        sh './gradlew :services:circleguard-notification-service:bootJar -x test --no-daemon'
+                    }
+                }
+                stage('Build dashboard-service') {
+                    steps {
+                        sh './gradlew :services:circleguard-dashboard-service:bootJar -x test --no-daemon'
+                    }
+                }
+            }
+        }
+
+        // ─────────────────────────────────────────────
+        // NIVEL 2: Unit Tests — @Tag("unit") por servicio
+        // ─────────────────────────────────────────────
+        stage('Unit Tests') {
+            parallel {
+                stage('Unit: auth-service') {
+                    steps {
+                        catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
+                            sh './gradlew :services:circleguard-auth-service:unitTest --no-daemon'
+                        }
+                    }
+                    post {
+                        always {
+                            junit allowEmptyResults: true, skipPublishingChecks: true,
+                                  testResults: 'services/circleguard-auth-service/build/test-results/unitTest/*.xml'
+                        }
+                    }
+                }
+                stage('Unit: identity-service') {
+                    steps {
+                        catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
+                            sh './gradlew :services:circleguard-identity-service:unitTest --no-daemon'
+                        }
+                    }
+                    post {
+                        always {
+                            junit allowEmptyResults: true, skipPublishingChecks: true,
+                                  testResults: 'services/circleguard-identity-service/build/test-results/unitTest/*.xml'
+                        }
+                    }
+                }
+                stage('Unit: gateway-service') {
+                    steps {
+                        catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
+                            sh './gradlew :services:circleguard-gateway-service:unitTest --no-daemon'
+                        }
+                    }
+                    post {
+                        always {
+                            junit allowEmptyResults: true, skipPublishingChecks: true,
+                                  testResults: 'services/circleguard-gateway-service/build/test-results/unitTest/*.xml'
+                        }
+                    }
+                }
+                stage('Unit: promotion-service') {
+                    steps {
+                        catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
+                            sh './gradlew :services:circleguard-promotion-service:unitTest --no-daemon'
+                        }
+                    }
+                    post {
+                        always {
+                            junit allowEmptyResults: true, skipPublishingChecks: true,
+                                  testResults: 'services/circleguard-promotion-service/build/test-results/unitTest/*.xml'
+                        }
+                    }
+                }
+                stage('Unit: notification-service') {
+                    steps {
+                        catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
+                            sh './gradlew :services:circleguard-notification-service:unitTest --no-daemon'
+                        }
+                    }
+                    post {
+                        always {
+                            junit allowEmptyResults: true, skipPublishingChecks: true,
+                                  testResults: 'services/circleguard-notification-service/build/test-results/unitTest/*.xml'
+                        }
+                    }
+                }
+                stage('Unit: dashboard-service') {
+                    steps {
+                        catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
+                            sh './gradlew :services:circleguard-dashboard-service:unitTest --no-daemon'
+                        }
+                    }
+                    post {
+                        always {
+                            junit allowEmptyResults: true, skipPublishingChecks: true,
+                                  testResults: 'services/circleguard-dashboard-service/build/test-results/unitTest/*.xml'
+                        }
+                    }
+                }
+            }
+        }
+
+        // ─────────────────────────────────────────────
+        // NIVEL 3: Integration Tests — @Tag("integration") por servicio
+        // ─────────────────────────────────────────────
+        stage('Integration Tests') {
+            parallel {
+                stage('Integration: auth-service') {
+                    steps {
+                        catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
+                            sh './gradlew :services:circleguard-auth-service:integrationTest --no-daemon'
+                        }
+                    }
+                    post {
+                        always {
+                            junit allowEmptyResults: true, skipPublishingChecks: true,
+                                  testResults: 'services/circleguard-auth-service/build/test-results/integrationTest/*.xml'
+                        }
+                    }
+                }
+                stage('Integration: identity-service') {
+                    steps {
+                        catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
+                            sh './gradlew :services:circleguard-identity-service:integrationTest --no-daemon'
+                        }
+                    }
+                    post {
+                        always {
+                            junit allowEmptyResults: true, skipPublishingChecks: true,
+                                  testResults: 'services/circleguard-identity-service/build/test-results/integrationTest/*.xml'
+                        }
+                    }
+                }
+                stage('Integration: gateway-service') {
+                    steps {
+                        catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
+                            sh './gradlew :services:circleguard-gateway-service:integrationTest --no-daemon'
+                        }
+                    }
+                    post {
+                        always {
+                            junit allowEmptyResults: true, skipPublishingChecks: true,
+                                  testResults: 'services/circleguard-gateway-service/build/test-results/integrationTest/*.xml'
+                        }
+                    }
+                }
+                stage('Integration: promotion-service') {
+                    steps {
+                        catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
+                            sh './gradlew :services:circleguard-promotion-service:integrationTest --no-daemon'
+                        }
+                    }
+                    post {
+                        always {
+                            junit allowEmptyResults: true, skipPublishingChecks: true,
+                                  testResults: 'services/circleguard-promotion-service/build/test-results/integrationTest/*.xml'
+                        }
+                    }
+                }
+                stage('Integration: notification-service') {
+                    steps {
+                        catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
+                            sh './gradlew :services:circleguard-notification-service:integrationTest --no-daemon'
+                        }
+                    }
+                    post {
+                        always {
+                            junit allowEmptyResults: true, skipPublishingChecks: true,
+                                  testResults: 'services/circleguard-notification-service/build/test-results/integrationTest/*.xml'
+                        }
+                    }
+                }
+                stage('Integration: dashboard-service') {
+                    steps {
+                        catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
+                            sh './gradlew :services:circleguard-dashboard-service:integrationTest --no-daemon'
+                        }
+                    }
+                    post {
+                        always {
+                            junit allowEmptyResults: true, skipPublishingChecks: true,
+                                  testResults: 'services/circleguard-dashboard-service/build/test-results/integrationTest/*.xml'
+                        }
+                    }
+                }
+            }
+        }
+
+        // ─────────────────────────────────────────────
+        // NIVEL 4: Docker Build — imagen por servicio con tag :master
+        // ─────────────────────────────────────────────
+        stage('Docker Build') {
+            parallel {
+                stage('Docker: auth-service') {
+                    steps {
+                        script {
+                            writeFile file: 'Dockerfile.ci-auth', text: """
+FROM eclipse-temurin:21-jre-jammy
+WORKDIR /app
+COPY services/circleguard-auth-service/build/libs/*.jar app.jar
+ENTRYPOINT ["java", "-jar", "app.jar"]
+"""
+                            sh "docker build -t circleguard-auth-service:${ENV_TAG} -f Dockerfile.ci-auth ."
+                        }
+                    }
+                }
+                stage('Docker: identity-service') {
+                    steps {
+                        script {
+                            writeFile file: 'Dockerfile.ci-identity', text: """
+FROM eclipse-temurin:21-jre-jammy
+WORKDIR /app
+COPY services/circleguard-identity-service/build/libs/*.jar app.jar
+ENTRYPOINT ["java", "-jar", "app.jar"]
+"""
+                            sh "docker build -t circleguard-identity-service:${ENV_TAG} -f Dockerfile.ci-identity ."
+                        }
+                    }
+                }
+                stage('Docker: gateway-service') {
+                    steps {
+                        script {
+                            writeFile file: 'Dockerfile.ci-gateway', text: """
+FROM eclipse-temurin:21-jre-jammy
+WORKDIR /app
+COPY services/circleguard-gateway-service/build/libs/*.jar app.jar
+ENTRYPOINT ["java", "-jar", "app.jar"]
+"""
+                            sh "docker build -t circleguard-gateway-service:${ENV_TAG} -f Dockerfile.ci-gateway ."
+                        }
+                    }
+                }
+                stage('Docker: promotion-service') {
+                    steps {
+                        script {
+                            writeFile file: 'Dockerfile.ci-promotion', text: """
+FROM eclipse-temurin:21-jre-jammy
+WORKDIR /app
+COPY services/circleguard-promotion-service/build/libs/*.jar app.jar
+ENTRYPOINT ["java", "-jar", "app.jar"]
+"""
+                            sh "docker build -t circleguard-promotion-service:${ENV_TAG} -f Dockerfile.ci-promotion ."
+                        }
+                    }
+                }
+                stage('Docker: notification-service') {
+                    steps {
+                        script {
+                            writeFile file: 'Dockerfile.ci-notification', text: """
+FROM eclipse-temurin:21-jre-jammy
+WORKDIR /app
+COPY services/circleguard-notification-service/build/libs/*.jar app.jar
+ENTRYPOINT ["java", "-jar", "app.jar"]
+"""
+                            sh "docker build -t circleguard-notification-service:${ENV_TAG} -f Dockerfile.ci-notification ."
+                        }
+                    }
+                }
+                stage('Docker: dashboard-service') {
+                    steps {
+                        script {
+                            writeFile file: 'Dockerfile.ci-dashboard', text: """
+FROM eclipse-temurin:21-jre-jammy
+WORKDIR /app
+COPY services/circleguard-dashboard-service/build/libs/*.jar app.jar
+ENTRYPOINT ["java", "-jar", "app.jar"]
+"""
+                            sh "docker build -t circleguard-dashboard-service:${ENV_TAG} -f Dockerfile.ci-dashboard ."
+                        }
+                    }
+                }
+            }
+        }
+
+        // ─────────────────────────────────────────────
+        // NIVEL 5: Deploy K8s + Health Check
+        // Los manifests base ya usan namespace: circleguard y NodePorts 30xxx.
+        // Solo se transforma :latest → :master en los deployments.
+        // ─────────────────────────────────────────────
+        stage('Deploy & Health Check') {
+            parallel {
+                stage('Deploy: auth-service') {
+                    steps {
+                        sh '''
+                            sed 's|:latest|:master|g' k8s/auth-service/deployment.yaml | kubectl apply -f -
+                            kubectl apply -f k8s/auth-service/service.yaml
+                            kubectl rollout restart deployment/circleguard-auth-service -n ${KUBE_NAMESPACE}
+                            kubectl rollout status deployment/circleguard-auth-service -n ${KUBE_NAMESPACE} --timeout=300s
+                        '''
+                    }
+                }
+                stage('Deploy: identity-service') {
+                    steps {
+                        sh '''
+                            sed 's|:latest|:master|g' k8s/identity-service/deployment.yaml | kubectl apply -f -
+                            kubectl apply -f k8s/identity-service/service.yaml
+                            kubectl rollout restart deployment/circleguard-identity-service -n ${KUBE_NAMESPACE}
+                            kubectl rollout status deployment/circleguard-identity-service -n ${KUBE_NAMESPACE} --timeout=300s
+                        '''
+                    }
+                }
+                stage('Deploy: gateway-service') {
+                    steps {
+                        sh '''
+                            sed 's|:latest|:master|g' k8s/gateway-service/deployment.yaml | kubectl apply -f -
+                            kubectl apply -f k8s/gateway-service/service.yaml
+                            kubectl rollout restart deployment/circleguard-gateway-service -n ${KUBE_NAMESPACE}
+                            kubectl rollout status deployment/circleguard-gateway-service -n ${KUBE_NAMESPACE} --timeout=300s
+                        '''
+                    }
+                }
+                stage('Deploy: promotion-service') {
+                    steps {
+                        sh '''
+                            sed 's|:latest|:master|g' k8s/promotion-service/deployment.yaml | kubectl apply -f -
+                            kubectl apply -f k8s/promotion-service/service.yaml
+                            kubectl rollout restart deployment/circleguard-promotion-service -n ${KUBE_NAMESPACE}
+                            kubectl rollout status deployment/circleguard-promotion-service -n ${KUBE_NAMESPACE} --timeout=300s
+                        '''
+                    }
+                }
+                stage('Deploy: notification-service') {
+                    steps {
+                        sh '''
+                            sed 's|:latest|:master|g' k8s/notification-service/deployment.yaml | kubectl apply -f -
+                            kubectl apply -f k8s/notification-service/service.yaml
+                            kubectl rollout restart deployment/circleguard-notification-service -n ${KUBE_NAMESPACE}
+                            kubectl rollout status deployment/circleguard-notification-service -n ${KUBE_NAMESPACE} --timeout=300s
+                        '''
+                    }
+                }
+                stage('Deploy: dashboard-service') {
+                    steps {
+                        sh '''
+                            sed 's|:latest|:master|g' k8s/dashboard-service/deployment.yaml | kubectl apply -f -
+                            kubectl apply -f k8s/dashboard-service/service.yaml
+                            kubectl rollout restart deployment/circleguard-dashboard-service -n ${KUBE_NAMESPACE}
+                            kubectl rollout status deployment/circleguard-dashboard-service -n ${KUBE_NAMESPACE} --timeout=300s
+                        '''
+                    }
+                }
+            }
+        }
+
+        // ─────────────────────────────────────────────
+        // NIVEL 6: E2E Tests — RestAssured contra servicios K8s (master)
+        // Port-forward en un único sh con trap EXIT para cleanup.
+        // Gateway en puerto 8887 (evita conflicto con Jenkins en 8080).
+        // ─────────────────────────────────────────────
+        stage('E2E Tests') {
+            steps {
+                script {
+                    catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
+                        sh '''
+                            kubectl port-forward svc/circleguard-gateway-service 8887:8087 -n $KUBE_NAMESPACE &
+                            GW_PID=$!
+                            kubectl port-forward svc/circleguard-auth-service 8180:8180 -n $KUBE_NAMESPACE &
+                            AUTH_PID=$!
+                            trap 'kill $GW_PID $AUTH_PID 2>/dev/null || true' EXIT
+                            sleep 8
+                            ./gradlew :tests:e2e:test \
+                                -Dgateway.url=http://localhost:8887 \
+                                -Dauth.url=http://localhost:8180 \
+                                -Dtest.admin.user=super_admin \
+                                -Dtest.admin.password=password \
+                                --no-daemon
+                        '''
+                    }
+                }
+            }
+            post {
+                always {
+                    junit allowEmptyResults: true, skipPublishingChecks: true,
+                          testResults: 'tests/e2e/build/test-results/test/*.xml'
+                }
+            }
+        }
+
+        // ─────────────────────────────────────────────
+        // NIVEL 7: Release Notes — generación automática de CHANGELOG
+        // Agrupa commits por tipo Conventional Commits desde el último tag.
+        // Crea un tag git con la versión del build y archiva CHANGELOG.md.
+        // ─────────────────────────────────────────────
+        stage('Release Notes') {
+            steps {
+                script {
+                    def version = "v1.0.${new Date().format('yyyyMMdd')}-b${BUILD_NUMBER}"
+                    sh """
+                        LAST_TAG=\$(git describe --tags --abbrev=0 2>/dev/null || git rev-list --max-parents=0 HEAD)
+
+                        {
+                          echo "# Release Notes — ${version}"
+                          echo ""
+                          echo "**Fecha:** \$(date '+%Y-%m-%d %H:%M')"
+                          echo "**Entorno:** master (producción)"
+                          echo "**Build Jenkins:** ${BUILD_NUMBER}"
+                          echo "**Commit:** \$(git rev-parse --short HEAD)"
+                          echo ""
+
+                          FEATS=\$(git log \${LAST_TAG}..HEAD --pretty=format:"%s" --no-merges | grep "^feat" || true)
+                          FIXES=\$(git log \${LAST_TAG}..HEAD --pretty=format:"%s" --no-merges | grep "^fix"  || true)
+                          DOCS=\$(git log \${LAST_TAG}..HEAD  --pretty=format:"%s" --no-merges | grep "^docs" || true)
+                          TESTS=\$(git log \${LAST_TAG}..HEAD --pretty=format:"%s" --no-merges | grep "^test" || true)
+                          OTHER=\$(git log \${LAST_TAG}..HEAD --pretty=format:"%s" --no-merges | grep -vE "^(feat|fix|docs|test)" || true)
+
+                          if [ -n "\$FEATS" ]; then echo "## Nuevas Funcionalidades"; echo "\$FEATS" | sed 's/^/- /'; echo ""; fi
+                          if [ -n "\$FIXES" ]; then echo "## Correcciones";           echo "\$FIXES" | sed 's/^/- /'; echo ""; fi
+                          if [ -n "\$DOCS"  ]; then echo "## Documentación";          echo "\$DOCS"  | sed 's/^/- /'; echo ""; fi
+                          if [ -n "\$TESTS" ]; then echo "## Pruebas";                echo "\$TESTS" | sed 's/^/- /'; echo ""; fi
+                          if [ -n "\$OTHER" ]; then echo "## Otros";                  echo "\$OTHER" | sed 's/^/- /'; echo ""; fi
+
+                          echo "## Commits incluidos"
+                          git log \${LAST_TAG}..HEAD --pretty=format:"- %h %s (%an)" --no-merges
+                        } > CHANGELOG.md
+
+                        git tag ${version} || true
+                    """
+                }
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: 'CHANGELOG.md', allowEmptyArchive: true
+                }
+            }
+        }
+
+    } // end stages
+
+    post {
+        always {
+            junit allowEmptyResults: true, skipPublishingChecks: true,
+                  testResults: 'services/**/build/test-results/**/*.xml, tests/e2e/build/test-results/**/*.xml'
+            sh 'kubectl scale deployment --replicas=0 --all -n ${KUBE_NAMESPACE} || true'
+        }
+        success {
+            echo 'Pipeline master completado. Servicios desplegados en circleguard (producción).'
+        }
+        unstable {
+            echo 'Algunos tests fallaron. Revisar los reportes JUnit antes de considerar el release válido.'
+        }
+        failure {
+            echo 'Pipeline fallido — el deploy a producción fue abortado.'
+        }
+    }
+}

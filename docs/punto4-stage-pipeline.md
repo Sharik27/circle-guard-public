@@ -204,5 +204,3 @@ Los 20 tests E2E se ejecutan contra los servicios reales en `circleguard-stage`.
 ### Pruebas de carga en stage
 
 Las pruebas de carga con Locust apuntan a los NodePorts `32xxx` del entorno stage. Los resultados esperados son equivalentes a los del entorno dev ya que ambos despliegan en el mismo clúster con los mismos recursos. Las métricas clave a observar son las mismas: latencia de login (p95 < 700ms), latencia de gate/validate (p95 < 25ms) y tasa de errores (objetivo: 0%).
-
----
