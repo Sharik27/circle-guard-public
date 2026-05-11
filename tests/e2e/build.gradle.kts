@@ -6,6 +6,12 @@ repositories {
     mavenCentral()
 }
 
+// El módulo E2E no usa Lombok; se excluye para evitar que la versión heredada
+// del bloque subprojects{} raíz quede sin resolver (no hay dependency-management aquí).
+configurations.all {
+    exclude(group = "org.projectlombok", module = "lombok")
+}
+
 dependencies {
     testImplementation("io.rest-assured:rest-assured:5.4.0")
     testImplementation("io.rest-assured:json-path:5.4.0")
