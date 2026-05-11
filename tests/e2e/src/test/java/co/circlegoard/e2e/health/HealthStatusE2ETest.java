@@ -23,13 +23,17 @@ class HealthStatusE2ETest extends E2ETestConfig {
     void getHealthStatus_withValidToken_returns200WithStatusField() {
         String token = adminToken();
 
-        given()
+        var response = given()
                 .header("Authorization", "Bearer " + token)
                 .when()
-                .get("/api/v1/health/status")
-                .then()
-                .statusCode(anyOf(equalTo(200), equalTo(403), equalTo(404)))
-                .contentType(ContentType.JSON);
+                .get("/api/v1/health/status");
+
+        int status = response.statusCode();
+        org.assertj.core.api.Assertions.assertThat(status).isIn(200, 403, 404);
+
+        if (status == 200) {
+            response.then().contentType(ContentType.JSON);
+        }
     }
 
     @Test

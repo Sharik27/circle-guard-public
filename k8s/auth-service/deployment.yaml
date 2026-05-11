@@ -54,6 +54,8 @@ spec:
                 configMapKeyRef:
                   name: infra-config
                   key: LDAP_PASSWORD
+            - name: IDENTITY_SERVICE_URL
+              value: "http://circleguard-identity-service:8083"
             - name: MANAGEMENT_HEALTH_PROBES_ENABLED
               value: "true"
             - name: MANAGEMENT_HEALTH_LDAP_ENABLED

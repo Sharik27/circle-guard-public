@@ -20,8 +20,10 @@ public class DualChainAuthenticationProvider implements AuthenticationProvider {
         try {
             // Chain 1: Try LDAP
             return ldapProvider.authenticate(authentication);
-        } catch (AuthenticationException e) {
+        } catch (Exception e) {
             // Chain 2: Fallback to Local DB
+            // Catches both AuthenticationException (wrong credentials) and any infrastructure
+            // exception (CommunicationException, etc.) when LDAP is unavailable.
             return localProvider.authenticate(authentication);
         }
     }
