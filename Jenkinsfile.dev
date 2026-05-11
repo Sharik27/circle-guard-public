@@ -417,19 +417,20 @@ ENTRYPOINT ["java", "-jar", "app.jar"]
         }
 
         // ─────────────────────────────────────────────
-        // NIVEL 6: E2E Tests — RestAssured contra Gateway K8s
-        // Se usa port-forward porque el JVM de Gradle corre dentro del
-        // contenedor Jenkins y no tiene ruta directa al NodePort del cluster.
+        // NIVEL 6: E2E Tests — RestAssured contra servicios K8s
+        // Port-forward doble: gateway (8080) para rutas generales,
+        // auth-service (8180) para obtener tokens (gateway no proxea /auth).
         // ─────────────────────────────────────────────
         stage('E2E Tests') {
             steps {
                 script {
-                    sh 'nohup kubectl port-forward svc/circleguard-gateway-service 8080:8087 -n ${KUBE_NAMESPACE} > /tmp/pf-e2e.log 2>&1 &'
+                    sh 'nohup kubectl port-forward svc/circleguard-gateway-service 8080:8087 -n ${KUBE_NAMESPACE} > /tmp/pf-gw.log 2>&1 &'
+                    sh 'nohup kubectl port-forward svc/circleguard-auth-service 8180:8180 -n ${KUBE_NAMESPACE} > /tmp/pf-auth.log 2>&1 &'
                     sh 'sleep 5'
                     catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
-                        sh './gradlew :tests:e2e:test -Dgateway.url=http://localhost:8080 --no-daemon'
+                        sh './gradlew :tests:e2e:test -Dgateway.url=http://localhost:8080 -Dauth.url=http://localhost:8180 -Dtest.admin.user=super_admin -Dtest.admin.password=password --no-daemon'
                     }
-                    sh 'pkill -f "kubectl port-forward svc/circleguard-gateway" || true'
+                    sh 'pkill -f "kubectl port-forward" || true'
                 }
             }
             post {
