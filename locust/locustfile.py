@@ -2,7 +2,7 @@ import os
 import json
 from locust import HttpUser, task, between, events
 
-ADMIN_USER = os.getenv("LOCUST_ADMIN_USER", "admin")
+ADMIN_USER = os.getenv("LOCUST_ADMIN_USER", "super_admin")
 ADMIN_PASS = os.getenv("LOCUST_ADMIN_PASS", "password")
 
 

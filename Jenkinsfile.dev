@@ -418,18 +418,18 @@ ENTRYPOINT ["java", "-jar", "app.jar"]
 
         // ─────────────────────────────────────────────
         // NIVEL 6: E2E Tests — RestAssured contra Gateway K8s
+        // Se usa port-forward porque el JVM de Gradle corre dentro del
+        // contenedor Jenkins y no tiene ruta directa al NodePort del cluster.
         // ─────────────────────────────────────────────
         stage('E2E Tests') {
             steps {
                 script {
-                    def nodeIp = sh(
-                        script: "kubectl get nodes -o jsonpath='{.items[0].status.addresses[0].address}'",
-                        returnStdout: true
-                    ).trim()
-                    def gatewayUrl = "http://${nodeIp}:30087"
+                    sh 'nohup kubectl port-forward svc/circleguard-gateway-service 8080:8087 -n ${KUBE_NAMESPACE} > /tmp/pf-e2e.log 2>&1 &'
+                    sh 'sleep 5'
                     catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
-                        sh "./gradlew :tests:e2e:test -Dgateway.url=${gatewayUrl} --no-daemon"
+                        sh './gradlew :tests:e2e:test -Dgateway.url=http://localhost:8080 --no-daemon'
                     }
+                    sh 'pkill -f "kubectl port-forward svc/circleguard-gateway" || true'
                 }
             }
             post {
@@ -450,16 +450,16 @@ ENTRYPOINT ["java", "-jar", "app.jar"]
                         script: "kubectl get nodes -o jsonpath='{.items[0].status.addresses[0].address}'",
                         returnStdout: true
                     ).trim()
-                    sh 'mkdir -p locust/reports && chmod 777 locust/reports'
+                    sh 'mkdir -p locust/reports'
                     sh 'docker build -t circleguard-locust:latest locust/'
                     catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
                         sh """
-                            docker run --rm \
+                            docker run --rm --user root \
                               -v \${WORKSPACE}/locust/reports:/reports \
-                              -e LOCUST_ADMIN_USER=admin \
+                              -e LOCUST_ADMIN_USER=super_admin \
                               -e LOCUST_ADMIN_PASS=password \
                               circleguard-locust:latest \
-                              --host http://${nodeIp}:30087
+                              --host http://${nodeIp}:31087
                         """
                     }
                 }
