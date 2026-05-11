@@ -6,7 +6,6 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.ldap.core.support.LdapContextSource;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
-import org.springframework.security.config.annotation.authentication.builders.AuthenticationManagerBuilder;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
@@ -47,19 +46,21 @@ public class SecurityConfig {
     }
 
     @Bean
-    public AuthenticationManager authenticationManager(HttpSecurity http, DualChainAuthenticationProvider dualChainProvider) throws Exception {
-        AuthenticationManagerBuilder builder = http.getSharedObject(AuthenticationManagerBuilder.class);
-        builder.authenticationProvider(dualChainProvider);
-        return builder.build();
+    public AuthenticationManager authenticationManager(DualChainAuthenticationProvider dualChainProvider) {
+        return new org.springframework.security.authentication.ProviderManager(dualChainProvider);
     }
 
     @Bean
-    public LdapContextSource contextSource() {
+    public LdapContextSource contextSource(
+            @org.springframework.beans.factory.annotation.Value("${spring.ldap.urls:ldap://localhost:389}") String ldapUrl,
+            @org.springframework.beans.factory.annotation.Value("${spring.ldap.base:dc=circleguard,dc=edu}") String ldapBase,
+            @org.springframework.beans.factory.annotation.Value("${spring.ldap.username:cn=admin,dc=circleguard,dc=edu}") String ldapUserDn,
+            @org.springframework.beans.factory.annotation.Value("${spring.ldap.password:admin}") String ldapPassword) {
         LdapContextSource contextSource = new LdapContextSource();
-        contextSource.setUrl("ldap://localhost:389");
-        contextSource.setBase("dc=circleguard,dc=edu");
-        contextSource.setUserDn("cn=admin,dc=circleguard,dc=edu");
-        contextSource.setPassword("admin");
+        contextSource.setUrl(ldapUrl);
+        contextSource.setBase(ldapBase);
+        contextSource.setUserDn(ldapUserDn);
+        contextSource.setPassword(ldapPassword);
         return contextSource;
     }
 
