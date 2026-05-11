@@ -1,870 +1,391 @@
-# Punto 3 — Tests Multinivel y Pipeline CI/CD Secuencial
+# Punto 3 - Pruebas Multinivel
 
-## Introducción
+## Resumen de cobertura
 
-El objetivo de este punto es incorporar una estrategia de testing completa al proyecto **CircleGuard**, con pruebas en tres niveles (unitarias, integración y E2E), pruebas de carga con Locust, y la reestructuración del `Jenkinsfile.dev` para ejecutar cada nivel de forma secuencial antes de avanzar al siguiente.
-
-### Niveles de test implementados
-
-| Nivel | Herramienta | Tag JUnit | Cantidad |
-|---|---|---|---|
-| Unitario | JUnit 5 + Mockito | `@Tag("unit")` | 6 clases, 32 tests |
-| Integración | JUnit 5 + Spring Test + TestContainers | `@Tag("integration")` | 5 clases, 19 tests |
-| E2E | RestAssured | *(sin tag)* | 5 clases, 25 tests |
-| Carga | Locust (Docker) | N/A | 4 escenarios |
-
-### Estrategia de separación por tags
-
-Se utiliza el sistema de etiquetas de JUnit 5 (`@Tag`) para ejecutar cada nivel de forma independiente. Gradle expone una tarea personalizada por nivel que filtra por tag:
-
-```
-./gradlew :services:<servicio>:unitTest         # solo @Tag("unit")
-./gradlew :services:<servicio>:integrationTest  # solo @Tag("integration")
-./gradlew :tests:e2e:test                       # módulo E2E completo
-```
-
-Esto permite que el pipeline CI/CD ejecute los niveles de forma secuencial y falle rápido: si los tests unitarios fallan, los de integración no se ejecutan.
+| Nivel | Herramienta | Cantidad |
+|---|---|---|
+| Unitarias | JUnit 5 + Mockito | 6 clases, 32 tests |
+| Integración | JUnit 5 + Spring Test + Testcontainers | 5 clases, 19 tests |
+| E2E | RestAssured contra K8s | 4 clases, 20 tests |
+| Carga | Locust 2.43 (Docker headless) | 4 escenarios, 50 usuarios, 2 min |
 
 ---
 
-## Estructura de archivos creados
+## Stages del pipeline CI/CD por nivel de prueba
+
+El `Jenkinsfile.dev` ejecuta cada nivel de prueba en un stage independiente y secuencial. Si un stage falla, el pipeline queda en estado `UNSTABLE` (no aborta) para que los reportes de todos los niveles queden siempre archivados.
 
 ```
-circle-guard-public/
-├── Jenkinsfile.dev                                        ← reestructurado (7 stages)
-├── tests/
-│   └── e2e/
-│       ├── build.gradle.kts
-│       └── src/test/java/co/circlegoard/e2e/
-│           ├── config/E2ETestConfig.java
-│           ├── auth/AuthE2ETest.java
-│           ├── health/HealthStatusE2ETest.java
-│           ├── contact/ContactRegistrationE2ETest.java
-│           ├── escalation/StatusEscalationE2ETest.java
-│           └── dashboard/DashboardE2ETest.java
-├── locust/
-│   ├── Dockerfile
-│   ├── locustfile.py
-│   └── locust.conf
-└── services/
-    ├── circleguard-auth-service/src/test/java/.../
-    │   ├── service/JwtTokenServiceTest.java               ← unit
-    │   ├── service/CustomUserDetailsServiceTest.java      ← unit
-    │   └── controller/AuthControllerIntegrationTest.java  ← integration
-    ├── circleguard-promotion-service/src/test/java/.../
-    │   ├── service/BuildingServiceTest.java               ← unit
-    │   ├── service/CircleServiceTest.java                 ← unit
-    │   └── integration/BuildingJpaIntegrationTest.java    ← integration
-    ├── circleguard-notification-service/src/test/java/.../
-    │   ├── service/TemplateServiceUnitTest.java            ← unit
-    │   └── service/NotificationKafkaIntegrationTest.java  ← integration
-    ├── circleguard-dashboard-service/src/test/java/.../
-    │   ├── service/KAnonymityFilterTest.java              ← unit
-    │   └── controller/DashboardControllerIntegrationTest.java ← integration
-    └── circleguard-identity-service/src/test/java/.../
-        └── service/IdentityVaultServiceIntegrationTest.java ← integration
+Build → Unit Tests → Integration Tests → Deploy to K8s → E2E Tests → Load Tests
 ```
+
+Los stages relevantes al punto 3 son:
+
+**Stage `Unit Tests`** - ejecuta `./gradlew unitTest` en todos los servicios. Solo corre tests con `@Tag("unit")`. El resultado se publica como reporte JUnit en Jenkins.
+
+**Stage `Integration Tests`** - ejecuta `./gradlew integrationTest`. Solo corre tests con `@Tag("integration")`. Testcontainers levanta instancias efímeras de PostgreSQL. El resultado se publica como reporte JUnit separado.
+
+**Stage `E2E Tests`** - después del despliegue en K8s, abre túneles `kubectl port-forward` hacia el gateway (`:8887`) y el auth-service (`:8180`), ejecuta `./gradlew :tests:e2e:test` y destruye los túneles al finalizar. El resultado se publica como reporte JUnit.
+
+**Stage `Load Tests`** - corre el contenedor `circleguard-locust:latest` con 50 usuarios y 2 minutos. Cuando termina, extrae el reporte HTML con `docker cp` y lo archiva como artefacto de Jenkins.
 
 ---
 
-## Paso 1 — Configuración de Gradle
+## 1. Pruebas Unitarias
 
-### Tareas `unitTest` e `integrationTest`
-
-Se agrega al final del `build.gradle.kts` de cada servicio la definición de dos tareas personalizadas que filtran los tests por tag:
-
-```kotlin
-tasks.register<Test>("unitTest") {
-    description = "Runs unit tests only (@Tag(\"unit\"))"
-    group = "verification"
-    useJUnitPlatform { includeTags("unit") }
-    testResultsDir.set(layout.buildDirectory.dir("test-results/unitTest"))
-}
-
-tasks.register<Test>("integrationTest") {
-    description = "Runs integration tests only (@Tag(\"integration\"))"
-    group = "verification"
-    useJUnitPlatform { includeTags("integration") }
-    testResultsDir.set(layout.buildDirectory.dir("test-results/integrationTest"))
-}
-```
-
-El parámetro `testResultsDir` escribe los XML de resultados en directorios separados (`unitTest/` e `integrationTest/`), lo que permite publicarlos de forma independiente en Jenkins con la directiva `junit`.
-
-### Módulo E2E en `settings.gradle.kts`
-
-```kotlin
-include(":tests:e2e")
-```
-
-Se registra el módulo E2E como subproyecto de Gradle. Su `build.gradle.kts` no usa el plugin `spring-boot`; solo declara dependencias de RestAssured y JUnit:
-
-```kotlin
-plugins { java }
-
-dependencies {
-    testImplementation("io.rest-assured:rest-assured:5.4.0")
-    testImplementation("io.rest-assured:json-path:5.4.0")
-    testImplementation(platform("org.junit:junit-bom:5.10.2"))
-    testImplementation("org.junit.jupiter:junit-jupiter")
-    testImplementation("org.assertj:assertj-core:3.25.3")
-    testImplementation("com.fasterxml.jackson.core:jackson-databind:2.17.0")
-}
-
-tasks.test {
-    useJUnitPlatform()
-    systemProperty("gateway.url", System.getProperty("gateway.url", "http://localhost:8080"))
-    systemProperty("test.admin.user", System.getProperty("test.admin.user", "admin"))
-    systemProperty("test.admin.password", System.getProperty("test.admin.password", "password"))
-}
-```
-
-Los parámetros `gateway.url`, `test.admin.user` y `test.admin.password` se inyectan como system properties desde el pipeline con `-D`, permitiendo apuntar a cualquier entorno sin modificar el código.
+Validan componentes individuales en aislamiento total: no se levanta contexto de Spring ni se accede a base de datos. Las clases se instancian directamente o con `@ExtendWith(MockitoExtension.class)`.
 
 ---
 
-## Paso 2 — Tests Unitarios (`@Tag("unit")`)
+### `JwtTokenServiceTest` - auth-service
 
-Los tests unitarios validan componentes individuales en aislamiento total. No levantan contexto de Spring ni acceden a bases de datos. Se instancian las clases directamente o con `@ExtendWith(MockitoExtension.class)`.
+**Por qué es relevante:** El JWT es el mecanismo de autenticación de toda la plataforma. Cualquier fallo en la generación del token (estructura malformada, secreto débil, claims incorrectos) impide que cualquier usuario acceda al sistema. Este test valida el contrato del token antes de que llegue a cualquier servicio.
 
-### auth-service — `JwtTokenServiceTest`
+**Qué valida:**
 
-Valida la generación de tokens JWT sin contexto de Spring, instanciando directamente `JwtTokenService` con un secreto de 32+ caracteres (mínimo para HMAC-SHA256):
-
-```java
-@Tag("unit")
-class JwtTokenServiceTest {
-
-    private final JwtTokenService jwtService = new JwtTokenService(
-        "test-secret-key-for-unit-tests-only-1234567890ab",
-        3600L
-    );
-
-    @Test
-    void generateToken_withValidInput_returnsNonNullToken() { ... }
-
-    @Test
-    void generateToken_producesThreePartJwt() {
-        // Verifica estructura header.payload.signature
-        assertThat(token.split("\\.")).hasSize(3);
-    }
-
-    @Test
-    void generateToken_containsAnonymousIdAsSubject() { ... }
-
-    @Test
-    void generateToken_containsPermissionsInClaim() { ... }
-
-    @Test
-    void generateToken_differentCallsProduceDifferentTokens() { ... }
-}
-```
-
-### auth-service — `CustomUserDetailsServiceTest`
-
-Valida la carga de usuarios desde el repositorio local, incluyendo el manejo de usuarios inactivos y la correcta generación de authorities con el prefijo `ROLE_`:
-
-```java
-@Tag("unit")
-@ExtendWith(MockitoExtension.class)
-class CustomUserDetailsServiceTest {
-
-    @Mock private LocalUserRepository localUserRepository;
-    @InjectMocks private CustomUserDetailsService service;
-
-    @Test void existingActiveUser_returnsUserDetails() { ... }
-    @Test void activeUserWithRole_hasRolePrefixedAuthority() { ... }
-    @Test void activeUserWithPermission_hasGranularAuthority() { ... }
-    @Test void unknownUser_throwsUsernameNotFoundException() { ... }
-    @Test void inactiveUser_throwsDisabledException() { ... }
-}
-```
-
-### promotion-service — `BuildingServiceTest`
-
-Valida la lógica de negocio del servicio de edificios, incluyendo la restricción de no eliminar un edificio que tenga pisos asociados:
-
-```java
-@Tag("unit")
-@ExtendWith(MockitoExtension.class)
-class BuildingServiceTest {
-
-    @Mock private BuildingRepository buildingRepository;
-    @Mock private FloorRepository floorRepository;
-    @InjectMocks private BuildingService buildingService;
-
-    @Test void createBuilding_withValidData_persistsBuildingWithCorrectFields() { ... }
-    @Test void deleteBuilding_withNoFloors_deletesSuccessfully() { ... }
-    @Test void deleteBuilding_withExistingFloors_throwsRuntimeException() { ... }
-    @Test void updateBuilding_withUnknownId_throwsRuntimeException() { ... }
-    @Test void updateBuilding_withExistingId_updatesAllFields() { ... }
-}
-```
-
-### promotion-service — `CircleServiceTest`
-
-Valida la lógica de círculos: generación de códigos de invitación con prefijo `MESH-`, unión por código y cerrado de círculos con escalada de miembros activos:
-
-```java
-@Tag("unit")
-@ExtendWith(MockitoExtension.class)
-class CircleServiceTest {
-
-    @Test void createCircle_generatesInviteCodeWithMeshPrefix() { ... }
-    @Test void createCircle_persistsCorrectNameAndLocation() { ... }
-    @Test void joinCircle_withInvalidCode_throwsRuntimeException() { ... }
-    @Test void forceFenceCircle_promotesActiveMembers() { ... }
-    @Test void getUserCircles_withUnknownUser_returnsEmptyList() { ... }
-}
-```
-
-### notification-service — `TemplateServiceUnitTest`
-
-Valida la generación de contenido para notificaciones push, SMS y email según el status de exposición. Se instancia `TemplateService` con un mock de la `Configuration` de FreeMarker y se inyectan los campos `@Value` mediante `ReflectionTestUtils`:
-
-```java
-@Tag("unit")
-class TemplateServiceUnitTest {
-
-    private final TemplateService templateService;
-
-    TemplateServiceUnitTest() throws Exception {
-        Configuration freemarkerConfig = mock(Configuration.class);
-        templateService = new TemplateService(freemarkerConfig);
-        ReflectionTestUtils.setField(templateService, "appName", "CircleGuard");
-        ReflectionTestUtils.setField(templateService, "deepLinkBase", "circleguard://");
-    }
-
-    @Test void buildPushContent_forSuspectStatus_containsWarningText() { ... }
-    @Test void buildPushContent_forProbableStatus_containsAlertText() { ... }
-    @Test void buildSmsContent_containsStatusAndAppName() { ... }
-    @Test void buildPushMetadata_withDeepLink_includesLink() { ... }
-    @Test void buildPushMetadata_withoutDeepLink_excludesLink() { ... }
-    @Test void buildEmailFallback_returnsNonNullSubjectAndBody() { ... }
-}
-```
-
-### dashboard-service — `KAnonymityFilterTest`
-
-Valida el filtro de k-anonimidad que suprime resultados cuando el total de usuarios o un conteo individual no alcanza el umbral mínimo, protegiendo la privacidad individual:
-
-```java
-@Tag("unit")
-class KAnonymityFilterTest {
-
-    private final KAnonymityFilter filter = new KAnonymityFilter();
-
-    @Test void apply_withNullStats_returnsEmptyMap() { ... }
-    @Test void apply_withSufficientTotalUsers_doesNotMaskResult() { ... }
-    @Test void apply_withTotalUsersBelowThreshold_masksEntireResult() { ... }
-    @Test void apply_withCountFieldBelowThreshold_masksIndividualCount() { ... }
-    @Test void apply_withCustomKThreshold_masksBasedOnCustomValue() { ... }
-    @Test void apply_withEmptyStats_returnsEmptyResult() { ... }
-}
-```
+| Test | Comportamiento esperado |
+|---|---|
+| `generateToken_withValidInput_returnsNonNullToken` | El servicio devuelve un token no nulo con credenciales válidas |
+| `generateToken_producesThreePartJwt` | La estructura del JWT es `header.payload.signature` (3 partes separadas por `.`) |
+| `generateToken_containsAnonymousIdAsSubject` | El `sub` del JWT contiene el UUID anónimo, nunca el nombre real |
+| `generateToken_containsPermissionsInClaim` | Los permisos del usuario se incluyen en el claim `roles` |
+| `generateToken_differentCallsProduceDifferentTokens` | Dos llamadas sucesivas producen tokens distintos (diferente `iat`) |
 
 ---
 
-## Paso 3 — Tests de Integración (`@Tag("integration")`)
+### `CustomUserDetailsServiceTest` - auth-service
 
-Los tests de integración validan la interacción entre capas del mismo servicio (controlador→servicio, servicio→repositorio, listener→dispatcher). Usan el contexto parcial o completo de Spring, sin levantar la infraestructura externa real salvo donde se usa TestContainers.
+**Por qué es relevante:** CircleGuard admite dos cadenas de autenticación: LDAP (usuarios universitarios) y base de datos local (fallback). Este test valida la cadena local - si falla, ningún usuario sin cuenta LDAP puede autenticarse, y el sistema de fallback queda inoperativo.
 
-### auth-service — `AuthControllerIntegrationTest`
+**Qué valida:**
 
-Usa `@WebMvcTest` para levantar únicamente la capa web del controlador de login, con todos los servicios dependientes como `@MockBean`:
-
-```java
-@Tag("integration")
-@WebMvcTest(LoginController.class)
-@Import(SecurityConfig.class)
-class AuthControllerIntegrationTest {
-
-    @Autowired private MockMvc mockMvc;
-    @MockBean private AuthenticationManager authManager;
-    @MockBean private JwtTokenService jwtService;
-    @MockBean private IdentityClient identityClient;
-    @MockBean private CustomUserDetailsService customUserDetailsService;
-
-    @Test
-    void login_withInvalidCredentials_returns401() throws Exception {
-        when(authManager.authenticate(any()))
-            .thenThrow(new BadCredentialsException("Bad credentials"));
-
-        mockMvc.perform(post("/api/v1/auth/login")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"username\":\"unknown\",\"password\":\"wrong\"}"))
-            .andExpect(status().isUnauthorized())
-            .andExpect(jsonPath("$.message").value("Invalid username or password"));
-    }
-
-    @Test void visitorHandoff_withValidAnonymousId_returnsTokenAndHandoffPayload() { ... }
-    @Test void visitorHandoff_withMissingAnonymousId_returns400() { ... }
-    @Test void login_withValidCredentials_returnsJwtAndAnonymousId() { ... }
-}
-```
-
-### identity-service — `IdentityVaultServiceIntegrationTest`
-
-Levanta el contexto completo de Spring pero excluye la auto-configuración de Kafka (el servicio produce eventos pero en tests no hay broker disponible). Valida que el vault de identidades genera UUIDs deterministas por identidad y que la resolución inversa funciona:
-
-```java
-@Tag("integration")
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE,
-    properties = "spring.autoconfigure.exclude=org.springframework.boot.autoconfigure.kafka.KafkaAutoConfiguration")
-@ActiveProfiles("test")
-class IdentityVaultServiceIntegrationTest {
-
-    @Autowired private IdentityVaultService vaultService;
-    @MockBean @SuppressWarnings("rawtypes") private KafkaTemplate kafkaTemplate;
-
-    @Test void getOrCreateAnonymousId_sameIdentity_returnsSameUuid() { ... }
-    @Test void getOrCreateAnonymousId_differentIdentities_returnDifferentUuids() { ... }
-    @Test void getOrCreateAnonymousId_returnsValidUuid() { ... }
-    @Test void resolveRealIdentity_afterCreate_returnsOriginalIdentity() { ... }
-}
-```
-
-### promotion-service — `BuildingJpaIntegrationTest`
-
-Usa `@DataJpaTest` con un contenedor PostgreSQL real (TestContainers) en lugar de H2. Flyway se deshabilita y se usa `ddl-auto=create-drop` para que Hibernate genere el esquema desde las entidades:
-
-```java
-@Tag("integration")
-@DataJpaTest
-@Testcontainers
-@AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
-@TestPropertySource(properties = {
-    "spring.flyway.enabled=false",
-    "spring.jpa.hibernate.ddl-auto=create-drop"
-})
-class BuildingJpaIntegrationTest {
-
-    @Container
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
-
-    @DynamicPropertySource
-    static void configureProperties(DynamicPropertyRegistry registry) {
-        registry.add("spring.datasource.url", postgres::getJdbcUrl);
-        registry.add("spring.datasource.username", postgres::getUsername);
-        registry.add("spring.datasource.password", postgres::getPassword);
-    }
-
-    @Test void save_building_persistsToRealPostgres() { ... }
-    @Test void findByCode_returnsCorrectBuilding() { ... }
-    @Test void findAll_returnsAllPersisted() { ... }
-    @Test void findFloorsByBuilding_withNoFloors_returnsEmptyList() { ... }
-}
-```
-
-### dashboard-service — `DashboardControllerIntegrationTest`
-
-Valida los cinco endpoints del `AnalyticsController` con `@WebMvcTest`, verificando tanto el status HTTP como la estructura del JSON de respuesta:
-
-```java
-@Tag("integration")
-@WebMvcTest(AnalyticsController.class)
-class DashboardControllerIntegrationTest {
-
-    @Autowired private MockMvc mockMvc;
-    @MockBean private AnalyticsService analyticsService;
-
-    @Test void getSummary_returns200WithSummaryData() { ... }
-    @Test void getDepartmentStats_withValidDepartment_returns200() { ... }
-    @Test void getTimeSeries_withDefaultParams_returns200() { ... }
-    @Test void getTimeSeries_withDailyPeriod_passesParamToService() { ... }
-    @Test void getHealthBoard_returns200() { ... }
-}
-```
-
-### notification-service — `NotificationKafkaIntegrationTest`
-
-Levanta el contexto completo sin servidor web (`WebEnvironment.NONE`) con mocks para todas las dependencias externas. Llama directamente al método del listener para simular la recepción de un mensaje Kafka:
-
-```java
-@Tag("integration")
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
-@ActiveProfiles("test")
-class NotificationKafkaIntegrationTest {
-
-    @Autowired private ExposureNotificationListener listener;
-    @MockBean private NotificationDispatcher dispatcher;
-    @MockBean private LmsService lmsService;
-    @MockBean private JavaMailSender mailSender;
-    @MockBean @SuppressWarnings("rawtypes") private KafkaTemplate kafkaTemplate;
-    @MockBean private WebClient.Builder webClientBuilder;
-
-    @Test
-    void handleStatusChange_withSuspectStatus_callsDispatcher() {
-        when(lmsService.syncRemoteAttendance(anyString(), anyString()))
-            .thenReturn(CompletableFuture.completedFuture(null));
-
-        listener.handleStatusChange(
-            "{\"anonymousId\":\"user-001\",\"status\":\"SUSPECT\"}");
-
-        verify(dispatcher).dispatch("user-001", "SUSPECT");
-        verify(lmsService).syncRemoteAttendance("user-001", "SUSPECT");
-    }
-
-    @Test void handleStatusChange_withActiveStatus_skipsDispatch() { ... }
-    @Test void handleStatusChange_withConfirmedStatus_callsDispatcher() { ... }
-    @Test void handleStatusChange_withMalformedJson_doesNotThrowException() { ... }
-}
-```
+| Test | Comportamiento esperado |
+|---|---|
+| `existingActiveUser_returnsUserDetails` | Un usuario activo existente se carga correctamente |
+| `activeUserWithRole_hasRolePrefixedAuthority` | El rol se expone con prefijo `ROLE_` según la convención de Spring Security |
+| `activeUserWithPermission_hasGranularAuthority` | Los permisos granulares se mapean correctamente a authorities |
+| `unknownUser_throwsUsernameNotFoundException` | Un usuario inexistente lanza `UsernameNotFoundException` |
+| `inactiveUser_throwsDisabledException` | Un usuario desactivado lanza `DisabledException` (no `BadCredentialsException`) |
 
 ---
 
-## Paso 4 — Tests E2E (módulo `tests/e2e/`)
+### `BuildingServiceTest` - promotion-service
 
-Los tests E2E validan flujos completos de usuario contra el Gateway real desplegado en Kubernetes. No usan mocks; cada test realiza peticiones HTTP reales y verifica respuestas.
+**Por qué es relevante:** El grafo de contactos en Neo4j está organizado jerárquicamente: Edificio → Piso → Punto de acceso. Si se permite eliminar un edificio que tiene pisos, se generan nodos huérfanos en Neo4j que rompen las consultas de trazabilidad de contactos. Este test protege la integridad referencial del grafo.
 
-### Clase base `E2ETestConfig`
+**Qué valida:**
 
-Configura `RestAssured.baseURI` desde la system property `gateway.url` y expone un método utilitario `adminToken()` reutilizable en todos los tests:
-
-```java
-public abstract class E2ETestConfig {
-
-    @BeforeAll
-    static void configure() {
-        RestAssured.baseURI = System.getProperty("gateway.url", "http://localhost:8080");
-        RestAssured.enableLoggingOfRequestAndResponseIfValidationFails();
-    }
-
-    protected static String obtainToken(String username, String password) {
-        Response response = given()
-            .contentType(ContentType.JSON)
-            .body("{\"username\":\"" + username + "\",\"password\":\"" + password + "\"}")
-            .post("/api/v1/auth/login");
-        return response.statusCode() == 200
-            ? response.jsonPath().getString("token")
-            : null;
-    }
-
-    protected static String adminToken() {
-        return obtainToken(
-            System.getProperty("test.admin.user", "admin"),
-            System.getProperty("test.admin.password", "password")
-        );
-    }
-}
-```
-
-### `AuthE2ETest` — Flujo de autenticación
-
-Valida el ciclo completo de login: credenciales válidas retornan JWT + tipo Bearer + anonymousId, credenciales inválidas retornan 401, y el token obtenido es funcional para endpoints protegidos.
-
-### `HealthStatusE2ETest` — Estado de salud
-
-Valida que el endpoint de estado de salud requiere autenticación (401 sin token, 401 con token malformado) y que con token válido retorna JSON con el campo `status`.
-
-### `ContactRegistrationE2ETest` — Registro de contacto
-
-Valida el flujo de validación de QR: sin token retorna 401, QR inválido retorna 400/404/422, y genera el código QR del usuario con token válido.
-
-### `StatusEscalationE2ETest` — Escalada de estado
-
-Valida el flujo de reporte de síntomas: sin token retorna 401, con token válido acepta el reporte (200/202) y permite consultar el historial de estado. Valida el flujo completo de reporte + consulta de estado.
-
-### `DashboardE2ETest` — Panel de analíticas
-
-Valida los cinco endpoints del dashboard: summary, time-series, health-board y department stats requieren autenticación y retornan JSON estructurado con los campos esperados cuando el usuario tiene permisos.
+| Test | Comportamiento esperado |
+|---|---|
+| `createBuilding_withValidData_persistsBuildingWithCorrectFields` | Los campos del edificio se persisten sin alteración |
+| `deleteBuilding_withNoFloors_deletesSuccessfully` | Se permite eliminar un edificio sin pisos asociados |
+| `deleteBuilding_withExistingFloors_throwsRuntimeException` | Se rechaza la eliminación si el edificio tiene pisos (integridad del grafo) |
+| `updateBuilding_withUnknownId_throwsRuntimeException` | Actualizar un ID inexistente lanza excepción |
+| `updateBuilding_withExistingId_updatesAllFields` | Todos los campos se actualizan correctamente |
 
 ---
 
-## Paso 5 — Pruebas de Carga con Locust
+### `CircleServiceTest` - promotion-service
 
-Locust se ejecuta como un contenedor Docker usando la imagen oficial `locustio/locust`, en modo headless, contra el Gateway desplegado en Kubernetes.
+**Por qué es relevante:** Los círculos de contacto son la unidad central del rastreo: cuando un usuario se declara positivo, el motor recorre los círculos para escalar el estado de sus contactos. Un error en la generación de códigos de invitación o en la lógica de cierre de círculos puede causar que contactos no sean notificados.
 
-### Estructura
+**Qué valida:**
 
-```
-locust/
-├── Dockerfile       ← FROM locustio/locust; copia archivos de configuración
-├── locust.conf      ← parámetros de carga: 50 usuarios, ramp 5/s, 2 min
-└── locustfile.py    ← 4 clases de usuario con escenarios de carga
-```
+| Test | Comportamiento esperado |
+|---|---|
+| `createCircle_generatesInviteCodeWithMeshPrefix` | El código de invitación siempre inicia con `MESH-` (identificable y no colisionable) |
+| `createCircle_persistsCorrectNameAndLocation` | El nombre y ubicación se persisten sin modificación |
+| `joinCircle_withInvalidCode_throwsRuntimeException` | Un código de invitación inválido es rechazado |
+| `forceFenceCircle_promotesActiveMembers` | Al cerrar un círculo, los miembros activos son escalados correctamente |
+| `getUserCircles_withUnknownUser_returnsEmptyList` | Un usuario sin círculos recibe lista vacía (no excepción) |
 
-### `locust.conf` — Configuración de carga
+---
+
+### `TemplateServiceUnitTest` - notification-service
+
+**Por qué es relevante:** El notification-service es el único canal de alerta a usuarios expuestos. Si el contenido de los mensajes push/SMS/email falla (texto nulo, formato incorrecto, deep link roto), los usuarios no reciben la alerta de exposición - el propósito principal de la plataforma falla. Este test protege la generación del contenido de las notificaciones.
+
+**Qué valida:**
+
+| Test | Comportamiento esperado |
+|---|---|
+| `buildPushContent_forSuspectStatus_containsWarningText` | El mensaje push para `SUSPECT` incluye texto de advertencia |
+| `buildPushContent_forProbableStatus_containsAlertText` | El mensaje push para `PROBABLE` incluye texto de alerta más urgente |
+| `buildSmsContent_containsStatusAndAppName` | El SMS incluye el nombre de la app y el estado de exposición |
+| `buildPushMetadata_withDeepLink_includesLink` | El metadata incluye el deep link cuando está configurado |
+| `buildPushMetadata_withoutDeepLink_excludesLink` | El metadata no incluye el campo de link cuando no está configurado |
+| `buildEmailFallback_returnsNonNullSubjectAndBody` | El fallback de email siempre produce asunto y cuerpo no nulos |
+
+---
+
+### `KAnonymityFilterTest` - dashboard-service
+
+**Por qué es relevante:** El dashboard expone estadísticas de salud por departamento/edificio. Sin k-anonimidad, una consulta de "edificio X con solo 2 personas" puede revelar implícitamente quién es el infectado. Este filtro es un requisito de privacidad de la plataforma: si falla, el dashboard viola los principios de privacidad que CircleGuard promete.
+
+**Qué valida:**
+
+| Test | Comportamiento esperado |
+|---|---|
+| `apply_withNullStats_returnsEmptyMap` | Entrada nula devuelve mapa vacío (no excepción) |
+| `apply_withSufficientTotalUsers_doesNotMaskResult` | Grupos con suficientes usuarios no son suprimidos |
+| `apply_withTotalUsersBelowThreshold_masksEntireResult` | Si el total de usuarios no alcanza el umbral k, todos los conteos son suprimidos |
+| `apply_withCountFieldBelowThreshold_masksIndividualCount` | Un conteo individual por debajo del umbral se enmascara aunque el total sea suficiente |
+| `apply_withCustomKThreshold_masksBasedOnCustomValue` | El umbral k es configurable y se aplica correctamente |
+| `apply_withEmptyStats_returnsEmptyResult` | Mapa vacío de entrada devuelve mapa vacío de salida |
+
+---
+
+## 2. Pruebas de Integración
+
+Validan la interacción entre capas dentro del mismo servicio. Usan contexto parcial o completo de Spring; donde se requiere base de datos real se usa Testcontainers (PostgreSQL efímero).
+
+---
+
+### `AuthControllerIntegrationTest` - auth-service
+
+**Por qué es relevante:** El controlador de login integra Spring Security, el `AuthenticationManager` y el `JwtTokenService`. Una mala configuración de seguridad puede provocar que el endpoint devuelva 403 en lugar de 401, o que filtre información sensible en el body de error. Este test valida el comportamiento HTTP real del controlador con la configuración de seguridad activa.
+
+**Tecnología:** `@WebMvcTest` + `@Import(SecurityConfig.class)` + `@MockBean` para dependencias.
+
+**Qué valida:**
+
+| Test | Comportamiento esperado |
+|---|---|
+| `login_withValidCredentials_returnsJwtAndAnonymousId` | 200 con `token`, `type: Bearer` y `anonymousId` en el body |
+| `login_withInvalidCredentials_returns401` | 401 con mensaje `"Invalid username or password"` (sin stack trace) |
+| `visitorHandoff_withValidAnonymousId_returnsTokenAndHandoffPayload` | 200 con token y payload de handoff para visitantes |
+| `visitorHandoff_withMissingAnonymousId_returns400` | 400 cuando el body no contiene `anonymousId` |
+
+---
+
+### `IdentityVaultServiceIntegrationTest` - identity-service
+
+**Por qué es relevante:** El vault de identidades es el componente más crítico de privacidad: separa las identidades reales de los pseudónimos que circulan en Neo4j. Si el vault genera UUIDs no deterministas, el mismo usuario acumula múltiples nodos en el grafo, rompiendo la trazabilidad. Si la resolución inversa falla, el servicio de notificaciones no puede contactar al usuario.
+
+**Tecnología:** `@SpringBootTest(webEnvironment=NONE)` con exclusión de Kafka + `@ActiveProfiles("test")`.
+
+**Qué valida:**
+
+| Test | Comportamiento esperado |
+|---|---|
+| `getOrCreateAnonymousId_sameIdentity_returnsSameUuid` | La misma identidad siempre produce el mismo UUID (determinismo) |
+| `getOrCreateAnonymousId_differentIdentities_returnDifferentUuids` | Identidades distintas producen UUIDs distintos |
+| `getOrCreateAnonymousId_returnsValidUuid` | El UUID generado tiene formato válido (no nulo, no vacío) |
+| `resolveRealIdentity_afterCreate_returnsOriginalIdentity` | La resolución inversa devuelve exactamente la identidad original |
+
+---
+
+### `BuildingJpaIntegrationTest` - promotion-service
+
+**Por qué es relevante:** El servicio de promoción usa PostgreSQL para los datos relacionales de edificios/pisos y Neo4j para el grafo de contactos. Un fallo en el mapeo JPA de edificios impediría agregar puntos de acceso al grafo. Este test valida contra PostgreSQL real (no H2) porque el esquema usa tipos y constraints específicos de Postgres.
+
+**Tecnología:** `@DataJpaTest` + `@Testcontainers` + `PostgreSQLContainer` + `@AutoConfigureTestDatabase(replace=NONE)`.
+
+**Qué valida:**
+
+| Test | Comportamiento esperado |
+|---|---|
+| `save_building_persistsToRealPostgres` | Un edificio se persiste correctamente en PostgreSQL real |
+| `findByCode_returnsCorrectBuilding` | La búsqueda por código retorna el edificio correcto |
+| `findAll_returnsAllPersisted` | La consulta de todos los edificios incluye todos los persistidos |
+| `findFloorsByBuilding_withNoFloors_returnsEmptyList` | Un edificio sin pisos devuelve lista vacía (no error) |
+
+---
+
+### `DashboardControllerIntegrationTest` - dashboard-service
+
+**Por qué es relevante:** El dashboard es el panel de control para el equipo de salud del campus. Sus endpoints exponen estadísticas agregadas que guían decisiones operativas (cierre de edificios, alertas masivas). Un fallo en el mapeo HTTP o en la estructura del JSON devuelto rompería la interfaz del panel de control.
+
+**Tecnología:** `@WebMvcTest(AnalyticsController.class)` + `@MockBean AnalyticsService`.
+
+**Qué valida:**
+
+| Test | Comportamiento esperado |
+|---|---|
+| `getSummary_returns200WithSummaryData` | El endpoint de resumen devuelve 200 con estructura JSON válida |
+| `getDepartmentStats_withValidDepartment_returns200` | Las estadísticas por departamento se devuelven correctamente |
+| `getTimeSeries_withDefaultParams_returns200` | La serie temporal funciona con parámetros por defecto |
+| `getTimeSeries_withDailyPeriod_passesParamToService` | El parámetro `period=daily` se propaga al servicio |
+| `getHealthBoard_returns200` | El tablero de salud devuelve 200 |
+
+---
+
+### `NotificationKafkaIntegrationTest` - notification-service
+
+**Por qué es relevante:** El notification-service consume eventos Kafka de escalada de estado y despacha alertas. Si el listener no procesa correctamente los eventos o el dispatcher no es invocado para los estados críticos (`SUSPECT`, `CONFIRMED`), los usuarios expuestos no reciben alertas - la función central de la plataforma falla silenciosamente.
+
+**Tecnología:** `@SpringBootTest(webEnvironment=NONE)` + `@MockBean` para Kafka, JavaMailSender, LmsService y WebClient.
+
+**Qué valida:**
+
+| Test | Comportamiento esperado |
+|---|---|
+| `handleStatusChange_withSuspectStatus_callsDispatcher` | El listener invoca al dispatcher cuando el status es `SUSPECT` |
+| `handleStatusChange_withActiveStatus_skipsDispatch` | Cuando el status es `ACTIVE` (sin riesgo), el dispatcher NO es invocado |
+| `handleStatusChange_withConfirmedStatus_callsDispatcher` | El listener invoca al dispatcher cuando el status es `CONFIRMED` |
+| `handleStatusChange_withMalformedJson_doesNotThrowException` | Un JSON malformado no lanza excepción (fallo silencioso, no crash del consumidor) |
+
+---
+
+## 3. Pruebas E2E
+
+Validan flujos completos de usuario contra los servicios reales desplegados en Kubernetes. No usan mocks: cada test realiza peticiones HTTP reales y verifica respuestas. Se ejecutan desde el módulo `tests/e2e/` usando RestAssured.
+
+**Configuración:** `E2ETestConfig` inyecta las URLs de gateway y auth-service desde system properties (`-Dgateway.url`, `-Dauth.url`) para que el pipeline pueda apuntar a cualquier entorno sin modificar el código.
+
+---
+
+### `HealthStatusE2ETest`
+
+**Por qué es relevante:** El endpoint de estado de salud es el más consultado de la plataforma - todos los usuarios lo consultan al ingresar al campus. Valida que el sistema de autenticación JWT funciona end-to-end en K8s y que el servicio de promoción devuelve la estructura correcta.
+
+**Qué valida:**
+
+| Test | Comportamiento esperado |
+|---|---|
+| `getHealthStatus_withoutToken_returns401` | Sin token el endpoint rechaza la petición |
+| `getHealthStatus_withMalformedToken_returns401` | Token malformado es rechazado |
+| `getHealthStatus_withValidToken_returns200WithStatusField` | Con token válido devuelve 200 y campo `status` en el JSON |
+| `getHealthStatus_responseContainsExpectedFields` | El body incluye todos los campos requeridos por el cliente móvil |
+| `getHealthStatus_multipleCallsReturnConsistentResult` | Llamadas repetidas devuelven el mismo estado (sin flicker) |
+
+---
+
+### `ContactRegistrationE2ETest`
+
+**Por qué es relevante:** El flujo de validación de QR es el punto de entrada al grafo de contactos: cuando un usuario escanea su QR al entrar a un edificio, se registra un encuentro en Neo4j. Sin este flujo, no hay datos de contacto y el rastreo es imposible.
+
+**Qué valida:**
+
+| Test | Comportamiento esperado |
+|---|---|
+| `validateQr_withoutToken_returns401` | Sin token el endpoint de validación rechaza la petición |
+| `validateQr_withInvalidToken_returns400OrUnprocessable` | QR con formato inválido retorna 400/422 |
+| `generateQr_withValidToken_returnsQrToken` | Un usuario autenticado puede generar su código QR |
+| `generateQr_tokenHasExpectedStructure` | El QR token generado tiene la estructura esperada |
+| `validateQr_withExpiredToken_returnsError` | Un QR expirado es rechazado por el gateway |
+
+---
+
+### `StatusEscalationE2ETest`
+
+**Por qué es relevante:** El flujo de reporte de síntomas activa la cadena de escalada: Kafka → promotion-service → notification-service → alertas. Si el endpoint de reporte falla, no se generan eventos y ningún contacto es alertado. Este test valida el punto de entrada al motor de escalada.
+
+**Qué valida:**
+
+| Test | Comportamiento esperado |
+|---|---|
+| `reportSymptoms_withoutToken_returns401` | Sin token el reporte es rechazado |
+| `reportSymptoms_withValidToken_returns200Or202` | Con token válido el reporte es aceptado (200 o 202 según implementación) |
+| `reportSymptoms_withInvalidPayload_returns400` | Payload malformado retorna 400 |
+| `getStatusHistory_withValidToken_returnsHistory` | El historial de estado del usuario es recuperable |
+| `reportAndQuery_fullFlow_statusUpdated` | Reporte seguido de consulta refleja el estado actualizado |
+
+---
+
+### `DashboardE2ETest`
+
+**Por qué es relevante:** El dashboard es la interfaz de toma de decisiones del equipo de salud. Valida que los cinco endpoints del panel funcionan end-to-end en K8s, con autenticación real y datos reales del servicio de analíticas.
+
+**Qué valida:**
+
+| Test | Comportamiento esperado |
+|---|---|
+| `getSummary_withValidToken_returns200` | El resumen general del sistema devuelve 200 con datos |
+| `getDepartmentStats_withValidToken_returns200` | Las estadísticas por departamento son accesibles |
+| `getTimeSeries_withValidToken_returns200` | La serie temporal devuelve 200 con estructura de array |
+| `getHealthBoard_withValidToken_returns200` | El tablero de salud devuelve 200 |
+| `getEndpoints_withoutToken_return401` | Todos los endpoints del dashboard requieren autenticación |
+
+---
+
+## 4. Pruebas de Carga con Locust
+
+### Configuración
 
 ```ini
-headless = true
-users = 50
-spawn-rate = 5
-run-time = 2m
-html = /reports/report.html
-loglevel = INFO
+# locust.conf
+headless   = true
+users      = 50        # usuarios virtuales concurrentes
+spawn-rate = 5         # nuevos usuarios/segundo - ramp-up de 10 segundos hasta 50
+run-time   = 2m        # duración en estado estable
+html       = /tmp/report.html
 ```
 
-| Parámetro | Valor | Descripción |
+### Escenarios de carga
+
+Se definen 4 clases de usuario que reproducen la distribución de carga típica de un campus universitario. Los pesos (weight) determinan cuántos usuarios virtuales corresponden a cada clase al llegar a los 50 en estado estable.
+
+| Clase | Escenario simulado | Peso | Usuarios | `wait_time` |
+|---|---|---|---|---|
+| `AuthUser` | Pico de autenticación al inicio de jornada | 3 | 15 | 1–3 s |
+| `HealthStatusUser` | Consulta continua de estado durante el día | 4 | 20 | 2–5 s |
+| `QRContactUser` | Escaneo de QR en puntos de acceso (3:1 validar vs. generar) | 2 | 10 | 1–2 s |
+| `EscalationUser` | Reporte de síntomas (evento poco frecuente) | 1 | 5 | 5–10 s |
+
+Cada clase que requiere autenticación obtiene su token en `on_start()` llamando directamente al auth-service (NodePort `31180`), separado del gateway (`31087`), ya que el gateway no enruta `/api/v1/auth/login`.
+
+### Endpoints evaluados
+
+| Endpoint | Servicio destino | Host en Locust |
 |---|---|---|
-| `users` | 50 | Usuarios virtuales concurrentes en estado estable |
-| `spawn-rate` | 5 | Usuarios nuevos por segundo durante el ramp-up (10s para llegar a 50) |
-| `run-time` | 2m | Duración de la prueba una vez alcanzado el estado estable |
-| `html` | `/reports/report.html` | Ruta del reporte HTML dentro del contenedor (montado como volumen) |
-
-### `locustfile.py` — Escenarios de carga
-
-Se definen 4 clases de usuario con pesos que reproducen la distribución de carga típica del campus:
-
-| Clase | Escenario | Peso | `wait_time` |
-|---|---|---|---|
-| `AuthUser` | Login repetido (pico matutino de autenticación) | 3 | 1–3 s |
-| `HealthStatusUser` | Consulta continua de estado de salud | 4 | 2–5 s |
-| `QRContactUser` | Escaneo de QR en puntos de acceso (3:1 validar vs. generar) | 2 | 1–2 s |
-| `EscalationUser` | Reporte de síntomas y monitoreo de escalada | 1 | 5–10 s |
-
-```python
-class HealthStatusUser(HttpUser):
-    wait_time = between(2, 5)
-    weight = 4
-    token = None
-
-    def on_start(self):
-        resp = self.client.post("/api/v1/auth/login",
-            json={"username": ADMIN_USER, "password": ADMIN_PASS})
-        if resp.status_code == 200:
-            self.token = resp.json().get("token")
-
-    @task
-    def get_health_status(self):
-        if self.token:
-            self.client.get("/api/v1/health/status",
-                headers={"Authorization": f"Bearer {self.token}"})
-```
-
-### Ejecución local
-
-```bash
-# Construir imagen
-docker build -t circleguard-locust:latest locust/
-
-# Ejecutar contra el gateway local
-docker run --rm \
-  -v $(pwd)/locust/reports:/reports \
-  -e LOCUST_ADMIN_USER=admin \
-  -e LOCUST_ADMIN_PASS=password \
-  circleguard-locust:latest \
-  --host http://localhost:8080
-```
-
-El reporte HTML queda en `locust/reports/report.html` con métricas de RPS, latencia percentil (p50, p95, p99) y tasa de errores por endpoint.
-
-![Reporte HTML de Locust con métricas de carga por endpoint](../screenshots/locust-report.png)
-
----
-
-## Paso 6 — Pipeline CI/CD Reestructurado (7 stages)
-
-El `Jenkinsfile.dev` pasa de un diseño "paralelo por servicio" (donde cada servicio hacía build + test + docker + deploy en un solo bloque paralelo) a un diseño **secuencial por nivel**, donde todos los servicios avanzan juntos de un nivel al siguiente.
-
-### Comparación de estructura
-
-| Diseño anterior | Diseño nuevo |
-|---|---|
-| 1 stage paralelo: `Servicios` (auth, identity, ...) | 7 stages secuenciales |
-| Cada servicio: build → test → docker → deploy (sin separación) | Build → Unit → Integration → Docker → Deploy → E2E → Load |
-| Tests sin separación por tipo | Tests separados por nivel con tags |
-| Sin E2E ni carga | E2E + Locust en stages dedicados |
-
-### Visión general del pipeline
-
-```
-Checkout
-    │
-Infraestructura K8s Base
-    │
-Build (paralelo por servicio)
-    │
-Unit Tests (paralelo por servicio)   ← @Tag("unit"), falla rápido
-    │
-Integration Tests (paralelo)          ← @Tag("integration"), TestContainers
-    │
-Docker Build (paralelo por servicio)
-    │
-Deploy & Health Check (paralelo)      ← kubectl apply + rollout status
-    │
-E2E Tests                             ← RestAssured contra Gateway K8s
-    │
-Load Tests                            ← Locust Docker, 50u / 2min
-```
-
-### Stage: Build
-
-Todos los servicios compilan su JAR en paralelo sin ejecutar tests (`-x test`):
-
-```groovy
-stage('Build') {
-    parallel {
-        stage('Build auth-service') {
-            steps {
-                sh './gradlew :services:circleguard-auth-service:bootJar -x test --no-daemon'
-            }
-        }
-        // ... demás servicios
-    }
-}
-```
-
-### Stage: Unit Tests
-
-Ejecuta la tarea `unitTest` (filtra `@Tag("unit")`) en paralelo para cada servicio. Un fallo marca el build como `UNSTABLE` pero no detiene el pipeline:
-
-```groovy
-stage('Unit Tests') {
-    parallel {
-        stage('Unit: auth-service') {
-            steps {
-                catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
-                    sh './gradlew :services:circleguard-auth-service:unitTest --no-daemon'
-                }
-            }
-            post {
-                always {
-                    junit allowEmptyResults: true, skipPublishingChecks: true,
-                          testResults: 'services/circleguard-auth-service/build/test-results/unitTest/*.xml'
-                }
-            }
-        }
-        // ... demás servicios
-    }
-}
-```
-
-### Stage: Integration Tests
-
-Ejecuta la tarea `integrationTest` (filtra `@Tag("integration")`). Los tests que usan TestContainers levantan contenedores Docker efímeros (PostgreSQL `postgres:16-alpine`) directamente desde el agente Jenkins:
-
-```groovy
-stage('Integration Tests') {
-    parallel {
-        stage('Integration: promotion-service') {
-            steps {
-                catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
-                    sh './gradlew :services:circleguard-promotion-service:integrationTest --no-daemon'
-                }
-            }
-            post {
-                always {
-                    junit allowEmptyResults: true, skipPublishingChecks: true,
-                          testResults: 'services/circleguard-promotion-service/build/test-results/integrationTest/*.xml'
-                }
-            }
-        }
-        // ... demás servicios
-    }
-}
-```
-
-### Stage: Docker Build
-
-Igual al diseño anterior: dos tags por servicio (`:BUILD_NUMBER` inmutable y `:dev` estable).
-
-### Stage: Deploy & Health Check
-
-Consolida el deploy y el rollout status en un solo stage paralelo (antes eran sub-stages separados por servicio):
-
-```groovy
-stage('Deploy: auth-service') {
-    steps {
-        sh '''
-            sed 's/namespace: circleguard/namespace: circleguard-dev/g' k8s/auth-service/deployment.yaml \
-                | sed 's|:latest|:dev|g' | kubectl apply -f -
-            sed 's/namespace: circleguard/namespace: circleguard-dev/g' k8s/auth-service/service.yaml \
-                | sed 's/nodePort: 30/nodePort: 31/g' | kubectl apply -f -
-            kubectl rollout restart deployment/circleguard-auth-service -n ${KUBE_NAMESPACE}
-            kubectl rollout status deployment/circleguard-auth-service -n ${KUBE_NAMESPACE} --timeout=300s
-        '''
-    }
-}
-```
-
-### Stage: E2E Tests
-
-Obtiene la IP del nodo Kubernetes en tiempo de ejecución y ejecuta el módulo E2E apuntando al NodePort del Gateway (`30087`):
-
-```groovy
-stage('E2E Tests') {
-    steps {
-        script {
-            def nodeIp = sh(
-                script: "kubectl get nodes -o jsonpath='{.items[0].status.addresses[0].address}'",
-                returnStdout: true
-            ).trim()
-            catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
-                sh "./gradlew :tests:e2e:test -Dgateway.url=http://${nodeIp}:30087 --no-daemon"
-            }
-        }
-    }
-    post {
-        always {
-            junit allowEmptyResults: true, skipPublishingChecks: true,
-                  testResults: 'tests/e2e/build/test-results/test/*.xml'
-        }
-    }
-}
-```
-
-### Stage: Load Tests
-
-Construye la imagen de Locust, monta el directorio `locust/reports/` como volumen y publica el reporte HTML en Jenkins con el plugin HTML Publisher:
-
-```groovy
-stage('Load Tests') {
-    steps {
-        script {
-            def nodeIp = sh(
-                script: "kubectl get nodes -o jsonpath='{.items[0].status.addresses[0].address}'",
-                returnStdout: true
-            ).trim()
-            sh 'mkdir -p locust/reports'
-            sh 'docker build -t circleguard-locust:latest locust/'
-            catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
-                sh """
-                    docker run --rm \
-                      -v \${WORKSPACE}/locust/reports:/reports \
-                      -e LOCUST_ADMIN_USER=admin \
-                      -e LOCUST_ADMIN_PASS=password \
-                      circleguard-locust:latest \
-                      --host http://${nodeIp}:30087
-                """
-            }
-        }
-    }
-    post {
-        always {
-            publishHTML([
-                allowMissing: true,
-                alwaysLinkToLastBuild: true,
-                keepAll: true,
-                reportDir: 'locust/reports',
-                reportFiles: 'report.html',
-                reportName: 'Locust Load Test Report'
-            ])
-        }
-    }
-}
-```
-
-### Bloque `post` global
-
-```groovy
-post {
-    always {
-        junit allowEmptyResults: true, skipPublishingChecks: true,
-              testResults: 'services/**/build/test-results/**/*.xml, tests/e2e/build/test-results/**/*.xml'
-    }
-    success  { echo 'Todos los niveles de test pasaron. Servicios desplegados en circleguard-dev.' }
-    unstable { echo 'Algunos tests fallaron. Revisar los reportes JUnit y Locust para detalles.' }
-    failure  { echo 'Pipeline fallido — revisar los logs del stage correspondiente.' }
-}
-```
-
-El patrón glob `**/build/test-results/**/*.xml` agrega todos los XML de unit, integration y E2E en el reporte consolidado de Jenkins.
-
----
-
-## Problemas encontrados y soluciones
-
-### `WeakKeyException` al levantar el contexto de Spring (auth-service)
-
-**Síntoma:** `io.jsonwebtoken.security.WeakKeyException: The specified key byte array is 0 bits` al ejecutar tests con contexto de Spring.
-
-**Causa:** El `application-test.yml` no tenía la propiedad `jwt.secret`. Al crear la clave HMAC con una cadena vacía, JJWT rechazaba el valor por no alcanzar los 256 bits mínimos.
-
-**Solución:** Agregar un secreto de al menos 32 caracteres en el perfil de test:
-
-```yaml
-jwt:
-  secret: "test-secret-key-for-testing-only-1234567890ab"
-```
-
----
-
-### `@SpringBootTest` fallando por Kafka (notification-service e identity-service)
-
-**Síntoma:** El contexto de Spring no levantaba con `Connection refused` al intentar conectar con un broker Kafka en `localhost:9092`.
-
-**Causa:** Los servicios tienen `@EnableKafka` y producen eventos, pero en el entorno de test no hay broker disponible.
-
-**Solución A (identity-service):** Excluir la auto-configuración de Kafka en la anotación del test:
-
-```java
-@SpringBootTest(properties =
-    "spring.autoconfigure.exclude=org.springframework.boot.autoconfigure.kafka.KafkaAutoConfiguration")
-```
-
-**Solución B (notification-service):** Declarar `@MockBean KafkaTemplate` para que Spring lo registre sin intentar conectar al broker real.
-
----
-
-### TestContainers necesita `@AutoConfigureTestDatabase(replace=NONE)` (promotion-service)
-
-**Síntoma:** `@DataJpaTest` reemplazaba automáticamente el datasource con H2 in-memory, ignorando el `PostgreSQLContainer`.
-
-**Causa:** Por defecto `@DataJpaTest` sustituye cualquier datasource configurado por una base de datos embebida.
-
-**Solución:** Agregar `@AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)` para que Spring use el datasource configurado por `@DynamicPropertySource`, que apunta al contenedor PostgreSQL de TestContainers.
-
----
-
-### `LmsService` sin implementación concreta (notification-service)
-
-**Síntoma:** `NoSuchBeanDefinitionException: No qualifying bean of type 'LmsService'` al levantar el contexto.
-
-**Causa:** `LmsService` es una interfaz con implementación condicional que no se registra en el perfil de test.
-
-**Solución:** Declarar `@MockBean private LmsService lmsService` en la clase de test para que Spring registre un mock en su lugar.
-
----
-
-### `@WebMvcTest` requiere importar `SecurityConfig` (auth-service)
-
-**Síntoma:** Los endpoints retornaban `403 Forbidden` sin importar las credenciales mockeadas.
-
-**Causa:** `@WebMvcTest` no carga la configuración de seguridad por defecto. Spring Security aplicaba la configuración por defecto que exige autenticación básica para todos los endpoints.
-
-**Solución:** Agregar `@Import(SecurityConfig.class)` para que la configuración de seguridad personalizada (que permite `/api/v1/auth/**` sin autenticación) se aplique durante el test.
-
----
-
-## Verificación
-
-### Ejecutar tests por nivel
-
-```bash
-# Solo tests unitarios de un servicio
-./gradlew :services:circleguard-auth-service:unitTest
-
-# Solo tests de integración de un servicio
-./gradlew :services:circleguard-promotion-service:integrationTest
-
-# Tests E2E contra el entorno local (servicios corriendo)
-./gradlew :tests:e2e:test -Dgateway.url=http://localhost:8080
-
-# Prueba de carga Locust local (2 minutos)
-docker build -t circleguard-locust:latest locust/
-docker run --rm \
-  -v $(pwd)/locust/reports:/reports \
-  -e LOCUST_ADMIN_USER=admin \
-  -e LOCUST_ADMIN_PASS=password \
-  circleguard-locust:latest \
-  --host http://localhost:8080
-```
-
-### Reportes en Jenkins
-
-Tras una ejecución completa del pipeline, Jenkins expone:
-
-| Reporte | Ubicación en Jenkins |
-|---|---|
-| Tests unitarios por servicio | Pestaña "Test Results" de cada stage Unit |
-| Tests de integración por servicio | Pestaña "Test Results" de cada stage Integration |
-| Tests E2E | Pestaña "Test Results" del stage E2E |
-| Reporte Locust | Menú lateral "Locust Load Test Report" (HTML Publisher) |
-| Resumen global | Pestaña "Test Results" del build (XML de todos los niveles) |
-
-![Pipeline Jenkins con los 7 stages secuenciales de test](../screenshots/jenkins-pipeline-7-stages.png)
-
-![Reportes JUnit unitarios e integración en Jenkins](../screenshots/jenkins-unit-integration-test-results.png)
-
-![Reporte HTML de Locust con métricas de rendimiento](../screenshots/locust-load-test-report.png)
+| `POST /api/v1/auth/login` | auth-service | `LOCUST_AUTH_HOST` (:31180) |
+| `GET /api/v1/auth/qr/generate` | auth-service | `LOCUST_AUTH_HOST` (:31180) |
+| `POST /api/v1/gate/validate` | gateway-service | `--host` (:31087) |
+| `GET /api/v1/health-status/stats` | promotion-service | `LOCUST_PROMOTION_HOST` (:31088) |
+| `POST /api/v1/health/report` | promotion-service | `LOCUST_PROMOTION_HOST` (:31088) |
+
+### Resultados finales (120 s, 50 usuarios, Locust 2.43.4)
+
+![Resumen del reporte HTML de Locust](../screenshots/locust-report-summary.png)
+
+| Endpoint | Requests | Fallos | Avg (ms) | Min (ms) | Max (ms) | Med (ms) | req/s |
+|---|---|---|---|---|---|---|---|
+| `POST /api/v1/auth/login` | 749 | 0 (0%) | 443 | 323 | 2047 | 410 | 6.28 |
+| `GET /api/v1/auth/qr/generate` | 184 | 0 (0%) | 10 | 4 | 57 | 9 | 1.54 |
+| `POST /api/v1/gate/validate` | 576 | 0 (0%) | 10 | 4 | 357 | 8 | 4.83 |
+| `GET /api/v1/health-status/stats` | 640 | 0 (0%) | 28 | 14 | 445 | 23 | 5.37 |
+| `POST /api/v1/health/report` | 77 | 0 (0%) | 53 | 25 | 865 | 36 | 0.65 |
+| **Agregado** | **2226** | **0 (0%)** | **162** | **4** | **2047** | **25** | **18.68** |
+
+#### Percentiles de tiempo de respuesta
+
+![Distribución de percentiles por endpoint en el reporte Locust](../screenshots/locust-report-percentiles.png)
+
+| Endpoint | p50 | p90 | p95 | p99 | p99.9 | p100 |
+|---|---|---|---|---|---|---|
+| `POST /api/v1/auth/login` | 410 ms | 540 ms | 590 ms | 1000 ms | 2000 ms | 2047 ms |
+| `GET /api/v1/auth/qr/generate` | 9 ms | 15 ms | 21 ms | 38 ms | 58 ms | 57 ms |
+| `POST /api/v1/gate/validate` | 8 ms | 14 ms | 18 ms | 35 ms | 360 ms | 357 ms |
+| `GET /api/v1/health-status/stats` | 23 ms | 38 ms | 48 ms | 87 ms | 450 ms | 445 ms |
+| `POST /api/v1/health/report` | 36 ms | 57 ms | 89 ms | 870 ms | 870 ms | 865 ms |
+
+### Análisis de resultados
+
+**Tasa de errores: 0% en todos los endpoints**
+
+Las 2.226 requests completaron sin un solo fallo. Esto confirma que el sistema soporta 50 usuarios concurrentes durante 2 minutos con la distribución de carga configurada.
+
+**`POST /api/v1/auth/login` - latencia alta pero esperada**
+
+El login es el endpoint más lento del conjunto: p50 de 410ms, p95 de 590ms y p99 de 1 segundo. El valor máximo de 2047ms ocurre durante los primeros 10 segundos del ramp-up, cuando los 50 usuarios obtienen su token simultáneamente en `on_start()`. Una vez que todos los tokens están disponibles, el promedio cae progresivamente de 1044ms (primer snapshot con 20 requests) a 443ms al final de la prueba, evidenciando que la contención inicial en bcrypt y LDAP se estabiliza. Esta latencia es aceptable para un evento puntual de login; no es un endpoint de alta frecuencia.
+
+**`POST /api/v1/gate/validate` - rendimiento óptimo**
+
+El endpoint de validación de QR es el más crítico en tiempo real: se ejecuta cada vez que un usuario escanea su código al entrar a un edificio. Con p50 de 8ms y p95 de 18ms bajo 10 usuarios concurrentes (peso 2 de 10), el gateway responde con latencias de un solo dígito de milisegundos. El valor máximo de 357ms es un outlier aislado, sin impacto en el percentil 99 (35ms). El throughput de 4.83 req/s es proporcional al peso del escenario.
+
+**`GET /api/v1/health-status/stats` - consulta Neo4j eficiente**
+
+Este endpoint representa el volumen más alto de la prueba (640 requests, 5.37 req/s) por ser el escenario con más usuarios (20, peso 4). La latencia p95 de 48ms indica que las consultas al grafo Neo4j responden correctamente bajo carga sostenida. El outlier máximo de 445ms aparece en los primeros snapshots del ramp-up y no se repite, lo que sugiere tiempo de calentamiento de la caché de Neo4j.
+
+**`GET /api/v1/auth/qr/generate` - el endpoint más rápido**
+
+Con p95 de 21ms y mediana de 9ms, la generación del token QR es la operación más ligera. Esto es esperado: el endpoint solo firma un UUID con HMAC-SHA256 sin consultas a base de datos.
+
+**`POST /api/v1/health/report` - cola de espera con outliers altos**
+
+Este endpoint registra solo 77 requests en 2 minutos (0.65 req/s), correspondiente a su peso 1 y wait time de 5–10 segundos. El p95 de 89ms es aceptable, pero el p99 salta a 870ms. Este outlier coincide con los primeros reportes enviados durante el ramp-up, posiblemente mientras Kafka Bootstrap establece la conexión con el broker. Los reportes posteriores (a partir del snapshot 4) se estabilizan en medianas de 36–42ms.
+
+**Throughput agregado y comportamiento del ramp-up**
+
+El sistema alcanza 18.68 req/s en estado estable, partiendo de 0 al inicio. El throughput crece linealmente durante el ramp-up (8 req/s a los 10s → 14.5 req/s a los 20s → 19 req/s a los 40s) y se mantiene estable entre 18.5 y 19.8 req/s durante los 110 segundos restantes, sin señales de degradación ni acumulación de errores.
