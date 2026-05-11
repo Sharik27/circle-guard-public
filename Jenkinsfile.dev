@@ -418,19 +418,20 @@ ENTRYPOINT ["java", "-jar", "app.jar"]
 
         // ─────────────────────────────────────────────
         // NIVEL 6: E2E Tests — RestAssured contra servicios K8s
-        // Port-forward doble: gateway (8080) para rutas generales,
-        // auth-service (8180) para obtener tokens (gateway no proxea /auth).
+        // Usa NodePort directo igual que Load Tests para evitar
+        // conflictos de puerto con Jenkins (8080) y la inestabilidad
+        // de kubectl port-forward entre pasos sh separados.
         // ─────────────────────────────────────────────
         stage('E2E Tests') {
             steps {
                 script {
-                    sh 'nohup kubectl port-forward svc/circleguard-gateway-service 8080:8087 -n ${KUBE_NAMESPACE} > /tmp/pf-gw.log 2>&1 &'
-                    sh 'nohup kubectl port-forward svc/circleguard-auth-service 8180:8180 -n ${KUBE_NAMESPACE} > /tmp/pf-auth.log 2>&1 &'
-                    sh 'sleep 5'
+                    def nodeIp = sh(
+                        script: "kubectl get nodes -o jsonpath='{.items[0].status.addresses[0].address}'",
+                        returnStdout: true
+                    ).trim()
                     catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
-                        sh './gradlew :tests:e2e:test -Dgateway.url=http://localhost:8080 -Dauth.url=http://localhost:8180 -Dtest.admin.user=super_admin -Dtest.admin.password=password --no-daemon'
+                        sh "./gradlew :tests:e2e:test -Dgateway.url=http://${nodeIp}:31087 -Dauth.url=http://${nodeIp}:31180 -Dtest.admin.user=super_admin -Dtest.admin.password=password --no-daemon"
                     }
-                    sh 'pkill -f "kubectl port-forward" || true'
                 }
             }
             post {
