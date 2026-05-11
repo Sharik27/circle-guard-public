@@ -436,6 +436,7 @@ pipeline {
         always {
             junit allowEmptyResults: true, skipPublishingChecks: true,
                   testResults: 'services/**/build/test-results/**/*.xml, tests/e2e/build/test-results/**/*.xml'
+            sh 'kubectl scale deployment --replicas=0 --all -n ${KUBE_NAMESPACE} || true'
         }
         success {
             echo 'Todos los niveles de test pasaron. Servicios desplegados en circleguard-dev.'
