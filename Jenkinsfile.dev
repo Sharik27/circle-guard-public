@@ -239,38 +239,86 @@ pipeline {
             parallel {
                 stage('Docker: auth-service') {
                     steps {
-                        sh "docker build --network=host -t circleguard-auth-service:${BUILD_NUMBER} -f services/circleguard-auth-service/Dockerfile ."
-                        sh "docker tag circleguard-auth-service:${BUILD_NUMBER} circleguard-auth-service:${ENV_TAG}"
+                        script {
+                            writeFile file: 'Dockerfile.ci-auth', text: """
+FROM eclipse-temurin:21-jre-jammy
+WORKDIR /app
+COPY services/circleguard-auth-service/build/libs/*.jar app.jar
+ENTRYPOINT ["java", "-jar", "app.jar"]
+"""
+                            sh "docker build -t circleguard-auth-service:${BUILD_NUMBER} -f Dockerfile.ci-auth ."
+                            sh "docker tag circleguard-auth-service:${BUILD_NUMBER} circleguard-auth-service:${ENV_TAG}"
+                        }
                     }
                 }
                 stage('Docker: identity-service') {
                     steps {
-                        sh "docker build --network=host -t circleguard-identity-service:${BUILD_NUMBER} -f services/circleguard-identity-service/Dockerfile ."
-                        sh "docker tag circleguard-identity-service:${BUILD_NUMBER} circleguard-identity-service:${ENV_TAG}"
+                        script {
+                            writeFile file: 'Dockerfile.ci-identity', text: """
+FROM eclipse-temurin:21-jre-jammy
+WORKDIR /app
+COPY services/circleguard-identity-service/build/libs/*.jar app.jar
+ENTRYPOINT ["java", "-jar", "app.jar"]
+"""
+                            sh "docker build -t circleguard-identity-service:${BUILD_NUMBER} -f Dockerfile.ci-identity ."
+                            sh "docker tag circleguard-identity-service:${BUILD_NUMBER} circleguard-identity-service:${ENV_TAG}"
+                        }
                     }
                 }
                 stage('Docker: gateway-service') {
                     steps {
-                        sh "docker build --network=host -t circleguard-gateway-service:${BUILD_NUMBER} -f services/circleguard-gateway-service/Dockerfile ."
-                        sh "docker tag circleguard-gateway-service:${BUILD_NUMBER} circleguard-gateway-service:${ENV_TAG}"
+                        script {
+                            writeFile file: 'Dockerfile.ci-gateway', text: """
+FROM eclipse-temurin:21-jre-jammy
+WORKDIR /app
+COPY services/circleguard-gateway-service/build/libs/*.jar app.jar
+ENTRYPOINT ["java", "-jar", "app.jar"]
+"""
+                            sh "docker build -t circleguard-gateway-service:${BUILD_NUMBER} -f Dockerfile.ci-gateway ."
+                            sh "docker tag circleguard-gateway-service:${BUILD_NUMBER} circleguard-gateway-service:${ENV_TAG}"
+                        }
                     }
                 }
                 stage('Docker: promotion-service') {
                     steps {
-                        sh "docker build --network=host -t circleguard-promotion-service:${BUILD_NUMBER} -f services/circleguard-promotion-service/Dockerfile ."
-                        sh "docker tag circleguard-promotion-service:${BUILD_NUMBER} circleguard-promotion-service:${ENV_TAG}"
+                        script {
+                            writeFile file: 'Dockerfile.ci-promotion', text: """
+FROM eclipse-temurin:21-jre-jammy
+WORKDIR /app
+COPY services/circleguard-promotion-service/build/libs/*.jar app.jar
+ENTRYPOINT ["java", "-jar", "app.jar"]
+"""
+                            sh "docker build -t circleguard-promotion-service:${BUILD_NUMBER} -f Dockerfile.ci-promotion ."
+                            sh "docker tag circleguard-promotion-service:${BUILD_NUMBER} circleguard-promotion-service:${ENV_TAG}"
+                        }
                     }
                 }
                 stage('Docker: notification-service') {
                     steps {
-                        sh "docker build --network=host -t circleguard-notification-service:${BUILD_NUMBER} -f services/circleguard-notification-service/Dockerfile ."
-                        sh "docker tag circleguard-notification-service:${BUILD_NUMBER} circleguard-notification-service:${ENV_TAG}"
+                        script {
+                            writeFile file: 'Dockerfile.ci-notification', text: """
+FROM eclipse-temurin:21-jre-jammy
+WORKDIR /app
+COPY services/circleguard-notification-service/build/libs/*.jar app.jar
+ENTRYPOINT ["java", "-jar", "app.jar"]
+"""
+                            sh "docker build -t circleguard-notification-service:${BUILD_NUMBER} -f Dockerfile.ci-notification ."
+                            sh "docker tag circleguard-notification-service:${BUILD_NUMBER} circleguard-notification-service:${ENV_TAG}"
+                        }
                     }
                 }
                 stage('Docker: dashboard-service') {
                     steps {
-                        sh "docker build --network=host -t circleguard-dashboard-service:${BUILD_NUMBER} -f services/circleguard-dashboard-service/Dockerfile ."
-                        sh "docker tag circleguard-dashboard-service:${BUILD_NUMBER} circleguard-dashboard-service:${ENV_TAG}"
+                        script {
+                            writeFile file: 'Dockerfile.ci-dashboard', text: """
+FROM eclipse-temurin:21-jre-jammy
+WORKDIR /app
+COPY services/circleguard-dashboard-service/build/libs/*.jar app.jar
+ENTRYPOINT ["java", "-jar", "app.jar"]
+"""
+                            sh "docker build -t circleguard-dashboard-service:${BUILD_NUMBER} -f Dockerfile.ci-dashboard ."
+                            sh "docker tag circleguard-dashboard-service:${BUILD_NUMBER} circleguard-dashboard-service:${ENV_TAG}"
+                        }
                     }
                 }
             }
