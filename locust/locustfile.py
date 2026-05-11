@@ -1,9 +1,20 @@
 import os
-import json
-from locust import HttpUser, task, between, events
+from locust import HttpUser, task, between
 
 ADMIN_USER = os.getenv("LOCUST_ADMIN_USER", "super_admin")
 ADMIN_PASS = os.getenv("LOCUST_ADMIN_PASS", "password")
+# Auth-service URL separado porque el gateway no enruta /api/v1/auth/login
+AUTH_HOST = os.getenv("LOCUST_AUTH_HOST", "")
+
+
+def _login(client, auth_host):
+    """Login contra auth-service. Usa URL absoluta cuando AUTH_HOST está definido."""
+    url = f"{auth_host}/api/v1/auth/login" if auth_host else "/api/v1/auth/login"
+    return client.post(
+        url,
+        name="/api/v1/auth/login",
+        json={"username": ADMIN_USER, "password": ADMIN_PASS},
+    )
 
 
 class AuthUser(HttpUser):
@@ -13,8 +24,10 @@ class AuthUser(HttpUser):
 
     @task
     def login_and_get_token(self):
+        url = f"{AUTH_HOST}/api/v1/auth/login" if AUTH_HOST else "/api/v1/auth/login"
         with self.client.post(
-            "/api/v1/auth/login",
+            url,
+            name="/api/v1/auth/login",
             json={"username": ADMIN_USER, "password": ADMIN_PASS},
             catch_response=True,
         ) as resp:
@@ -31,10 +44,7 @@ class HealthStatusUser(HttpUser):
     token = None
 
     def on_start(self):
-        resp = self.client.post(
-            "/api/v1/auth/login",
-            json={"username": ADMIN_USER, "password": ADMIN_PASS},
-        )
+        resp = _login(self.client, AUTH_HOST)
         if resp.status_code == 200:
             self.token = resp.json().get("token")
 
@@ -54,10 +64,7 @@ class QRContactUser(HttpUser):
     token = None
 
     def on_start(self):
-        resp = self.client.post(
-            "/api/v1/auth/login",
-            json={"username": ADMIN_USER, "password": ADMIN_PASS},
-        )
+        resp = _login(self.client, AUTH_HOST)
         if resp.status_code == 200:
             self.token = resp.json().get("token")
 
@@ -65,7 +72,7 @@ class QRContactUser(HttpUser):
     def validate_qr(self):
         if self.token:
             self.client.post(
-                "/api/v1/qr/validate",
+                "/api/v1/gate/validate",
                 json={"qrToken": "test-qr-token"},
                 headers={"Authorization": f"Bearer {self.token}"},
             )
@@ -86,10 +93,7 @@ class EscalationUser(HttpUser):
     token = None
 
     def on_start(self):
-        resp = self.client.post(
-            "/api/v1/auth/login",
-            json={"username": ADMIN_USER, "password": ADMIN_PASS},
-        )
+        resp = _login(self.client, AUTH_HOST)
         if resp.status_code == 200:
             self.token = resp.json().get("token")
 
