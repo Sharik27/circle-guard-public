@@ -470,6 +470,7 @@ ENTRYPOINT ["java", "-jar", "app.jar"]
                               -e LOCUST_ADMIN_USER=super_admin \
                               -e LOCUST_ADMIN_PASS=password \
                               -e LOCUST_AUTH_HOST=http://${nodeIp}:31180 \
+                              -e LOCUST_PROMOTION_HOST=http://${nodeIp}:31088 \
                               circleguard-locust:latest \
                               --host http://${nodeIp}:31087
                         """

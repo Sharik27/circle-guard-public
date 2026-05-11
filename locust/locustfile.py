@@ -3,8 +3,9 @@ from locust import HttpUser, task, between
 
 ADMIN_USER = os.getenv("LOCUST_ADMIN_USER", "super_admin")
 ADMIN_PASS = os.getenv("LOCUST_ADMIN_PASS", "password")
-# Auth-service URL separado porque el gateway no enruta /api/v1/auth/login
-AUTH_HOST = os.getenv("LOCUST_AUTH_HOST", "")
+# Hosts separados porque el gateway no enruta estos endpoints
+AUTH_HOST       = os.getenv("LOCUST_AUTH_HOST", "")
+PROMOTION_HOST  = os.getenv("LOCUST_PROMOTION_HOST", "")
 
 
 def _login(client, auth_host):
@@ -49,10 +50,12 @@ class HealthStatusUser(HttpUser):
             self.token = resp.json().get("token")
 
     @task
-    def get_health_status(self):
+    def get_health_stats(self):
         if self.token:
+            url = f"{PROMOTION_HOST}/api/v1/health-status/stats" if PROMOTION_HOST else "/api/v1/health-status/stats"
             self.client.get(
-                "/api/v1/health/status",
+                url,
+                name="/api/v1/health-status/stats",
                 headers={"Authorization": f"Bearer {self.token}"},
             )
 
@@ -80,8 +83,10 @@ class QRContactUser(HttpUser):
     @task(1)
     def generate_qr(self):
         if self.token:
+            url = f"{AUTH_HOST}/api/v1/auth/qr/generate" if AUTH_HOST else "/api/v1/auth/qr/generate"
             self.client.get(
-                "/api/v1/auth/qr",
+                url,
+                name="/api/v1/auth/qr/generate",
                 headers={"Authorization": f"Bearer {self.token}"},
             )
 
@@ -100,8 +105,10 @@ class EscalationUser(HttpUser):
     @task
     def report_symptoms(self):
         if self.token:
+            url = f"{PROMOTION_HOST}/api/v1/health/report" if PROMOTION_HOST else "/api/v1/health/report"
             self.client.post(
-                "/api/v1/health/report",
+                url,
+                name="/api/v1/health/report",
                 json={"symptoms": ["fever", "cough"], "severity": "mild"},
                 headers={"Authorization": f"Bearer {self.token}"},
             )
