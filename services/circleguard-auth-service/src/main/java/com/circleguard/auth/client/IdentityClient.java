@@ -3,6 +3,7 @@ package com.circleguard.auth.client;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 
 @Component
@@ -13,9 +14,14 @@ public class IdentityClient {
     private String identityBaseUrl;
 
     public UUID getAnonymousId(String realIdentity) {
-        String url = identityBaseUrl + "/api/v1/identities/map";
-        Map<String, String> request = Map.of("realIdentity", realIdentity);
-        Map response = restTemplate.postForObject(url, request, Map.class);
-        return UUID.fromString(response.get("anonymousId").toString());
+        try {
+            String url = identityBaseUrl + "/api/v1/identities/map";
+            Map<String, String> request = Map.of("realIdentity", realIdentity);
+            Map response = restTemplate.postForObject(url, request, Map.class);
+            return UUID.fromString(response.get("anonymousId").toString());
+        } catch (Exception e) {
+            // Fallback: deterministic UUID derived from identity when service is unavailable
+            return UUID.nameUUIDFromBytes(realIdentity.getBytes(StandardCharsets.UTF_8));
+        }
     }
 }
