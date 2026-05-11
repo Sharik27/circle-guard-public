@@ -418,19 +418,28 @@ ENTRYPOINT ["java", "-jar", "app.jar"]
 
         // ─────────────────────────────────────────────
         // NIVEL 6: E2E Tests — RestAssured contra servicios K8s
-        // Usa NodePort directo igual que Load Tests para evitar
-        // conflictos de puerto con Jenkins (8080) y la inestabilidad
-        // de kubectl port-forward entre pasos sh separados.
+        // Port-forward en un único sh para que los procesos background
+        // sobrevivan durante toda la ejecución. Gateway en puerto 8887
+        // (evita conflicto con Jenkins que ocupa el 8080).
         // ─────────────────────────────────────────────
         stage('E2E Tests') {
             steps {
                 script {
-                    def nodeIp = sh(
-                        script: "kubectl get nodes -o jsonpath='{.items[0].status.addresses[0].address}'",
-                        returnStdout: true
-                    ).trim()
                     catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
-                        sh "./gradlew :tests:e2e:test -Dgateway.url=http://${nodeIp}:31087 -Dauth.url=http://${nodeIp}:31180 -Dtest.admin.user=super_admin -Dtest.admin.password=password --no-daemon"
+                        sh '''
+                            kubectl port-forward svc/circleguard-gateway-service 8887:8087 -n $KUBE_NAMESPACE &
+                            GW_PID=$!
+                            kubectl port-forward svc/circleguard-auth-service 8180:8180 -n $KUBE_NAMESPACE &
+                            AUTH_PID=$!
+                            trap 'kill $GW_PID $AUTH_PID 2>/dev/null || true' EXIT
+                            sleep 8
+                            ./gradlew :tests:e2e:test \
+                                -Dgateway.url=http://localhost:8887 \
+                                -Dauth.url=http://localhost:8180 \
+                                -Dtest.admin.user=super_admin \
+                                -Dtest.admin.password=password \
+                                --no-daemon
+                        '''
                     }
                 }
             }
