@@ -246,8 +246,7 @@ WORKDIR /app
 COPY services/circleguard-auth-service/build/libs/*.jar app.jar
 ENTRYPOINT ["java", "-jar", "app.jar"]
 """
-                            sh "docker build -t circleguard-auth-service:${BUILD_NUMBER} -f Dockerfile.ci-auth ."
-                            sh "docker tag circleguard-auth-service:${BUILD_NUMBER} circleguard-auth-service:${ENV_TAG}"
+                            sh "docker build -t circleguard-auth-service:${ENV_TAG} -f Dockerfile.ci-auth ."
                         }
                     }
                 }
@@ -260,8 +259,7 @@ WORKDIR /app
 COPY services/circleguard-identity-service/build/libs/*.jar app.jar
 ENTRYPOINT ["java", "-jar", "app.jar"]
 """
-                            sh "docker build -t circleguard-identity-service:${BUILD_NUMBER} -f Dockerfile.ci-identity ."
-                            sh "docker tag circleguard-identity-service:${BUILD_NUMBER} circleguard-identity-service:${ENV_TAG}"
+                            sh "docker build -t circleguard-identity-service:${ENV_TAG} -f Dockerfile.ci-identity ."
                         }
                     }
                 }
@@ -274,8 +272,7 @@ WORKDIR /app
 COPY services/circleguard-gateway-service/build/libs/*.jar app.jar
 ENTRYPOINT ["java", "-jar", "app.jar"]
 """
-                            sh "docker build -t circleguard-gateway-service:${BUILD_NUMBER} -f Dockerfile.ci-gateway ."
-                            sh "docker tag circleguard-gateway-service:${BUILD_NUMBER} circleguard-gateway-service:${ENV_TAG}"
+                            sh "docker build -t circleguard-gateway-service:${ENV_TAG} -f Dockerfile.ci-gateway ."
                         }
                     }
                 }
@@ -288,8 +285,7 @@ WORKDIR /app
 COPY services/circleguard-promotion-service/build/libs/*.jar app.jar
 ENTRYPOINT ["java", "-jar", "app.jar"]
 """
-                            sh "docker build -t circleguard-promotion-service:${BUILD_NUMBER} -f Dockerfile.ci-promotion ."
-                            sh "docker tag circleguard-promotion-service:${BUILD_NUMBER} circleguard-promotion-service:${ENV_TAG}"
+                            sh "docker build -t circleguard-promotion-service:${ENV_TAG} -f Dockerfile.ci-promotion ."
                         }
                     }
                 }
@@ -302,8 +298,7 @@ WORKDIR /app
 COPY services/circleguard-notification-service/build/libs/*.jar app.jar
 ENTRYPOINT ["java", "-jar", "app.jar"]
 """
-                            sh "docker build -t circleguard-notification-service:${BUILD_NUMBER} -f Dockerfile.ci-notification ."
-                            sh "docker tag circleguard-notification-service:${BUILD_NUMBER} circleguard-notification-service:${ENV_TAG}"
+                            sh "docker build -t circleguard-notification-service:${ENV_TAG} -f Dockerfile.ci-notification ."
                         }
                     }
                 }
@@ -316,8 +311,7 @@ WORKDIR /app
 COPY services/circleguard-dashboard-service/build/libs/*.jar app.jar
 ENTRYPOINT ["java", "-jar", "app.jar"]
 """
-                            sh "docker build -t circleguard-dashboard-service:${BUILD_NUMBER} -f Dockerfile.ci-dashboard ."
-                            sh "docker tag circleguard-dashboard-service:${BUILD_NUMBER} circleguard-dashboard-service:${ENV_TAG}"
+                            sh "docker build -t circleguard-dashboard-service:${ENV_TAG} -f Dockerfile.ci-dashboard ."
                         }
                     }
                 }
@@ -431,7 +425,7 @@ ENTRYPOINT ["java", "-jar", "app.jar"]
                             GW_PID=$!
                             kubectl port-forward svc/circleguard-auth-service 8180:8180 -n $KUBE_NAMESPACE &
                             AUTH_PID=$!
-                            trap 'kill $GW_PID $AUTH_PID 2>/stage/null || true' EXIT
+                            trap 'kill $GW_PID $AUTH_PID 2>/dev/null || true' EXIT
                             sleep 8
                             ./gradlew :tests:e2e:test \
                                 -Dgateway.url=http://localhost:8887 \
@@ -464,7 +458,7 @@ ENTRYPOINT ["java", "-jar", "app.jar"]
                     sh 'mkdir -p locust/reports'
                     sh 'docker build -t circleguard-locust:latest locust/'
                     // Limpia contenedor huérfano de ejecuciones anteriores
-                    sh 'docker rm circleguard-locust-run 2>/stage/null || true'
+                    sh 'docker rm circleguard-locust-run 2>/dev/null || true'
                     catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
                         sh """
                             docker run --name circleguard-locust-run --user root \
