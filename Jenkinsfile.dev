@@ -450,7 +450,7 @@ ENTRYPOINT ["java", "-jar", "app.jar"]
                         script: "kubectl get nodes -o jsonpath='{.items[0].status.addresses[0].address}'",
                         returnStdout: true
                     ).trim()
-                    sh 'mkdir -p locust/reports'
+                    sh 'mkdir -p locust/reports && chmod 777 locust/reports'
                     sh 'docker build -t circleguard-locust:latest locust/'
                     catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
                         sh """
@@ -466,14 +466,8 @@ ENTRYPOINT ["java", "-jar", "app.jar"]
             }
             post {
                 always {
-                    publishHTML([
-                        allowMissing: true,
-                        alwaysLinkToLastBuild: true,
-                        keepAll: true,
-                        reportDir: 'locust/reports',
-                        reportFiles: 'report.html',
-                        reportName: 'Locust Load Test Report'
-                    ])
+                    archiveArtifacts artifacts: 'locust/reports/report.html',
+                                     allowEmptyArchive: true
                 }
             }
         }
