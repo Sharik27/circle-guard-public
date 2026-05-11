@@ -463,10 +463,11 @@ ENTRYPOINT ["java", "-jar", "app.jar"]
                     ).trim()
                     sh 'mkdir -p locust/reports'
                     sh 'docker build -t circleguard-locust:latest locust/'
+                    // Limpia contenedor huérfano de ejecuciones anteriores
+                    sh 'docker rm circleguard-locust-run 2>/dev/null || true'
                     catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
                         sh """
-                            docker run --rm --user root \
-                              -v \${WORKSPACE}/locust/reports:/reports \
+                            docker run --name circleguard-locust-run --user root \
                               -e LOCUST_ADMIN_USER=super_admin \
                               -e LOCUST_ADMIN_PASS=password \
                               -e LOCUST_AUTH_HOST=http://${nodeIp}:31180 \
@@ -475,6 +476,9 @@ ENTRYPOINT ["java", "-jar", "app.jar"]
                               --host http://${nodeIp}:31087
                         """
                     }
+                    // Copia el reporte antes de eliminar el contenedor
+                    sh 'docker cp circleguard-locust-run:/tmp/report.html locust/reports/report.html || true'
+                    sh 'docker rm circleguard-locust-run || true'
                 }
             }
             post {
