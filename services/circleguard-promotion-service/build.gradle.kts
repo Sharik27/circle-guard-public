@@ -45,7 +45,10 @@ tasks.register<Test>("unitTest") {
 }
 
 tasks.register<Test>("integrationTest") {
-    description = "Runs integration tests only (@Tag(\"integration\"))"
+    description = "Runs integration tests only (@Tag(\"integration\"), excludes @Tag(\"testcontainers\"))"
     group = "verification"
-    useJUnitPlatform { includeTags("integration") }
+    useJUnitPlatform {
+        includeTags("integration")
+        excludeTags("testcontainers")
+    }
 }
